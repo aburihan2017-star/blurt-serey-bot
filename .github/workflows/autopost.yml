@@ -1,0 +1,36 @@
+name: Blurt to Serey Auto Post
+
+on:
+  schedule:
+    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় রান হবে (UTC 04:00 & 16:00)
+    - cron: '0 4,16 * * *'
+  workflow_dispatch: # চাইলে আপনি নিজেই বাটন টিপেও টেস্ট রান করতে পারবেন
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Auto Poster
+        env:
+          SEREY_POSTING_KEY: ${{ secrets.SEREY_POSTING_KEY }}
+          SEREY_USERNAME: raihan123
+        run: python main.py
+
+      - name: Save Queue and Log State
+        run: |
+          git config --global user.name "AutoBot"
+          git config --global user.email "bot@github.com"
+          git add automation_data.json || true
+          git commit -m "Update post queue and history" || true
+          git push || true
