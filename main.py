@@ -4,7 +4,6 @@ import os
 import re
 import time
 from beem import Steem
-from beem.exceptions import AccountDoesNotExistsException
 import requests
 
 BLURT_USER = "aburihan1"
@@ -16,7 +15,9 @@ BLURT_NODES = [
     "https://rpc.blurt.one",
     "https://blurt.world",
 ]
-SEREY_NODES = ["https://serey.io", "wss://serey.io"]
+
+# Serey-র সঠিক ব্লকচেইন নোড পাথ (/wss সহ)
+SEREY_NODES = ["https://serey.io/wss", "wss://serey.io/wss"]
 
 DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
@@ -24,8 +25,14 @@ DAY_IN_SECONDS = 86400
 
 
 def get_serey_client():
-    """Serey নেটওয়ার্কে কানেক্ট হওয়া"""
-    return Steem(node=SEREY_NODES, keys=[SEREY_KEY])
+    """Serey নেটওয়ার্কে সঠিক নোড ও টাইমআউট সহ কানেক্ট হওয়া"""
+    return Steem(
+        node=SEREY_NODES,
+        keys=[SEREY_KEY],
+        num_retries=3,
+        timeout=15,
+        custom_chains={"SEREY": {"chain_assets": [{"symbol": "SRY"}]}},
+    )
 
 
 def blurt_call(method, params):
@@ -74,12 +81,11 @@ def get_post_details(permlink):
 
 def clean_permlink(title):
     permlink = re.sub(r"[^a-z0-9\-]+", "", title.lower().replace(" ", "-"))
-    return f"{permlink[:40]}-{int(time.time())}"
+    return f"{permlink[:35]}-{int(time.time())}"
 
 
 def post_to_serey(title, body, category, tags, created_date):
-    """বাংলাদেশ কমিউনিটিতে লাইভ পোস্ট ব্রডকাস্ট করা"""
-    print(f"Serey-তে লাইভ পাবলিশ করা হচ্ছে: {title}")
+    print(f"Serey-তে লাইভ পাঠানো হচ্ছে: {title}")
     print(f"কমিউনিটি: Bengali Community (Bangladesh) | ক্যাটাগরি: {category}")
 
     date_str = created_date.split("T")[0] if created_date else "1 year ago"
@@ -93,7 +99,6 @@ def post_to_serey(title, body, category, tags, created_date):
 
     try:
         serey = get_serey_client()
-        # Serey ব্লকচেইনে বাংলাদেশ কমিউনিটিতে কমেন্ট/পোস্ট অপারেশন
         serey.post(
             title=title,
             body=full_body,
@@ -106,7 +111,7 @@ def post_to_serey(title, body, category, tags, created_date):
         print("Serey ব্লকচেইনে সফলভাবে পোস্ট সাবমিট হয়েছে!")
         return True
     except Exception as e:
-        print(f"Serey-তে সাবমিট করার সময় সমস্যা: {e}")
+        print(f"Serey ব্লকচেইনে সাবমিট করার সময় রিপোর্ট: {e}")
         return False
 
 
@@ -157,7 +162,6 @@ def run():
                 f"পোস্ট সফল! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
             )
         else:
-            # ব্যর্থ হলে আবার কিউ-তে সামনে রেখে দেওয়া যাতে পরে চেষ্টা করতে পারে
             data["queue"].insert(0, next_permlink)
             save_data(data)
     else:
