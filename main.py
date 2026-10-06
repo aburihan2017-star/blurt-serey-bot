@@ -73,7 +73,6 @@ def get_post_details(permlink):
 
 
 def get_serey_auth_token():
-    """লগইন করে সেশন টোকেন নেওয়া"""
     login_url = "https://global-api.serey.io/api/v2/auth/login"
     payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
 
@@ -97,34 +96,49 @@ def get_serey_auth_token():
     return None
 
 
-def get_categories(token):
-    """bangladesh.serey.io এর ড্রপডাউন ক্যাটাগরিগুলো ফেচ করা"""
-    cat_urls = [
-        "https://bangladesh.serey.io/api/categories",
-        "https://bangladesh.serey.io/api/category",
-        "https://global-api.serey.io/api/v2/categories",
-    ]
-    headers = dict(BASE_HEADERS)
-    headers["Authorization"] = f"Bearer {token}"
+def detect_category(title, content):
+    """পোস্টের লেখা পড়ে সঠিক Serey ক্যাটাগরি স্ট্রিং নির্বাচন"""
+    text = (title + " " + content).lower()
 
-    for url in cat_urls:
-        try:
-            r = requests.get(url, headers=headers, timeout=10)
-            if r.status_code == 200:
-                res_data = r.json()
-                cats = (
-                    res_data.get("data")
-                    if isinstance(res_data, dict) and "data" in res_data
-                    else res_data
-                )
-                if isinstance(cats, list) and len(cats) > 0:
-                    print(
-                        f"ক্যাটাগরি তালিকা পাওয়া গেছে ({len(cats)}টি ক্যাটাগরি)"
-                    )
-                    return cats
-        except Exception:
-            continue
-    return []
+    if any(
+        w in text
+        for w in [
+            "splinterlands",
+            "game",
+            "battle",
+            "card",
+            "quest",
+            "gladius",
+            "pack",
+        ]
+    ):
+        return "gaming"
+    elif any(
+        w in text
+        for w in [
+            "photo",
+            "photography",
+            "camera",
+            "nature",
+            "flower",
+            "sky",
+            "sunset",
+        ]
+    ):
+        return "photography"
+    elif any(w in text for w in ["crypto", "bitcoin", "blurt", "hive", "token"]):
+        return "crypto"
+    elif any(
+        w in text
+        for w in ["travel", "tour", "trip", "visit", "village", "city"]
+    ):
+        return "travel"
+    elif any(w in text for w in ["art", "drawing", "paint", "craft", "design"]):
+        return "art"
+    elif any(w in text for w in ["life", "routine", "story", "my day"]):
+        return "lifestyle"
+    else:
+        return "general"
 
 
 def submit_to_bangladesh_serey(title, body, created_date):
@@ -135,45 +149,33 @@ def submit_to_bangladesh_serey(title, body, created_date):
         print("লগইন টোকেন পাওয়া যায়নি।")
         return False
 
-    print("লগইন সফল! ড্রপডাউন ডাটা প্রসেস করা হচ্ছে...")
-    categories_list = get_categories(token)
+    # ক্যাটাগরি স্বয়ংক্রিয়ভাবে নির্ধারণ (String হিসেবে)
+    chosen_category = detect_category(title, body)
+    print(f"পোস্টের জন্য নির্ধারিত ক্যাটাগরি (String): {chosen_category}")
 
     # সোর্স ক্রেডিট
     date_str = created_date.split("T")[0] if created_date else "1 year ago"
     footer = f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
     full_body = body + footer
 
-    # ক্যাটাগরি নির্বাচন
-    cat_val = None
-    sub_cat_val = None
-
-    if categories_list and isinstance(categories_list[0], dict):
-        first_cat = categories_list[0]
-        cat_val = first_cat.get("id") or first_cat.get("_id")
-        sub_list = first_cat.get("subCategories", [])
-        if sub_list and isinstance(sub_list[0], dict):
-            sub_cat_val = sub_list[0].get("id") or sub_list[0].get("_id")
-        elif sub_list:
-            sub_cat_val = sub_list[0]
-
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
-    # আসল পোস্টিং এন্ডপয়েন্ট (bangladesh.serey.io)
     post_urls = [
         "https://bangladesh.serey.io/api/posts",
         "https://bengali.serey.io/api/posts",
     ]
 
-    # সার্ভারের চাওয়া 'categories' ফিল্ড সহ পে-লোড
+    # সার্ভারের নির্দেশ অনুযায়ী 'categories' এখন বিশুদ্ধ string
     post_payload = {
         "title": title,
         "content": full_body,
-        "description": full_body[:120],
+        "body": full_body,
+        "description": full_body[:150],
+        "categories": chosen_category,  # String format
+        "category": chosen_category,
         "community": "bangladesh",
-        "categories": [cat_val] if cat_val else ["general"],
-        "category": cat_val or "general",
-        "subCategory": sub_cat_val,
+        "platform": "bangladesh",
         "author": SEREY_USER,
     }
 
