@@ -1,6 +1,5 @@
 {
   "queue": [
-    "my-new-addition-to-splinterlands",
     "i-opened-3-glint-packs",
     "my-experience-buying-the-new",
     "buying-ashveil-tactician-card-in",
@@ -31,9 +30,11 @@
     "my-new-experience-with-today"
   ],
   "posted": [
-    "new-addition-to-my-splinterlands"
+    "new-addition-to-my-splinterlands",
+    "my-new-addition-to-splinterlands"
   ],
   "timestamps": [
-    1791256299.69696
+    1791256299.69696,
+    1791256654.8497558
   ]
 }
