@@ -71,16 +71,14 @@ def get_post_details(permlink):
     return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
 
 
-def get_serey_auth_token():
+def get_serey_auth():
     login_url = "https://global-api.serey.io/api/v2/auth/login"
     payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
     try:
-        r = requests.post(
-            login_url, json=payload, headers=BASE_HEADERS, timeout=15
-        )
+        r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=15)
         if r.status_code in [200, 201]:
             data = r.json()
-            return (
+            token = (
                 data.get("token")
                 or data.get("accessToken")
                 or (
@@ -89,207 +87,76 @@ def get_serey_auth_token():
                     else None
                 )
             )
+            # লগইন রেসপন্স থেকেই কোনো Community ObjectId পাওয়া যায় কি না দেখা
+            comm_from_login = None
+            m = re.search(r'"(?:community|_community|communityId)"\s*:\s*"([a-f0-9]{24})"', r.text)
+            if m:
+                comm_from_login = m.group(1)
+            return token, comm_from_login
         else:
             print(f"লগইন রেসপন্স: {r.status_code}")
     except Exception as e:
         print(f"লগইন এরর: {e}")
-    return None
+    return None, None
 
 
-def find_community_id(token):
-    # GET রিকোয়েস্টের জন্য পরিচ্ছন্ন হেডার
-    clean_headers = {
+def find_community_id(token, fallback_id=None):
+    if fallback_id:
+        print(f"লগইন ডাটা থেকে কমিউনিটি আইডি পাওয়া গেছে: {fallback_id}")
+        return fallback_id
+
+    session = requests.Session()
+    session.headers.update({
         "User-Agent": BASE_HEADERS["User-Agent"],
-        "Accept": "application/json",
         "Authorization": f"Bearer {token}",
-    }
+    })
 
-    # ১. সরাসরি ক্যাটাগরি ও কমিউনিটি এন্ডপয়েন্ট চেক
-    urls = [
-        "https://bangladesh.serey.io/api/categories",
-        "https://bangladesh.serey.io/api/communities",
-        "https://global-api.serey.io/api/v2/categories",
-        "https://global-api.serey.io/api/v2/communities",
-        "https://bangladesh.serey.io/api/community",
+    # ১. blog/new পেজ স্ক্র্যাপ করে আইডি খোঁজা (এই পেজটিতে সব কমিউনিটির আইডি লোড থাকে)
+    web_pages = [
+        "https://bangladesh.serey.io/blog/new",
+        "https://bangladesh.serey.io",
     ]
-
-    for u in urls:
+    for page in web_pages:
         try:
-            r = requests.get(u, headers=clean_headers, timeout=8)
+            r = session.get(page, timeout=10)
+            print(f"চেক পেজ {page} -> স্ট্যাটাস: {r.status_code}")
             if r.status_code == 200:
                 text = r.text
-                m = re.search(
-                    r'"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"[^}]*?"(?:name|title)"\s*:\s*"(?:Bengali Community|Bangladesh)"',
-                    text,
-                    re.I,
-                )
+                # Bengali Community এর ObjectId খোঁজা
+                m = re.search(r'"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"[^}]*?"(?:name|title)"\s*:\s*"[^"]*Bengali[^"]*"', text, re.I)
                 if not m:
-                    m = re.search(
-                        r'"(?:name|title)"\s*:\s*"(?:Bengali Community|Bangladesh)"[^}]*?"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"',
-                        text,
-                        re.I,
-                    )
+                    m = re.search(r'"(?:name|title)"\s*:\s*"[^"]*Bengali[^"]*"[^}]*?"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"', text, re.I)
                 if not m:
-                    m = re.search(r'"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"', text)
+                    # যে কোনো ভ্যালিড ২৪ অক্ষরের ObjectId খুঁজে নেওয়া
+                    m = re.search(r'"community(?:Id)?"\s*:\s*"([a-f0-9]{24})"', text)
+                if not m:
+                    # __NEXT_DATA__ ট্যাগ থেকে আইডি বের করা
+                    m_next = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text)
+                    if m_next:
+                        ids = re.findall(r'"_id"\s*:\s*"([a-f0-9]{24})"', m_next.group(1))
+                        if ids:
+                            print(f"NEXT_DATA থেকে কমিউনিটি আইডি পাওয়া গেছে: {ids[0]}")
+                            return ids[0]
+
                 if m:
                     cid = m.group(1)
-                    print(f"Bengali Community ID পাওয়া গেছে: {cid}")
+                    print(f"ওয়েবপেজ থেকে Bengali Community ID পাওয়া গেছে: {cid}")
                     return cid
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"পেজ ফেচ এরর: {e}")
 
-    # ২. যদি উপরোক্ত এন্ডপয়েন্ট কাজ না করে, সাম্প্রতিক পোস্ট থেকে আইডি সংগ্রহ
-    feed_urls = [
-        "https://bangladesh.serey.io/api/posts",
-        "https://global-api.serey.io/api/v2/posts",
+    # ২. সাম্প্রতিক পোস্ট ও ক্যাটাগরি এন্ডপয়েন্ট থেকে আইডি খোঁজা
+    api_urls = [
+        "https://bangladesh.serey.io/api/categories",
+        "https://bangladesh.serey.io/api/posts?limit=5",
+        "https://global-api.serey.io/api/v2/categories",
+        "https://global-api.serey.io/api/v2/posts?limit=5",
     ]
-    for fu in feed_urls:
+    for api in api_urls:
         try:
-            r = requests.get(fu, headers=clean_headers, timeout=8)
+            r = session.get(api, timeout=8)
+            print(f"চেক API {api} -> স্ট্যাটাস: {r.status_code}")
             if r.status_code == 200:
-                posts = r.json()
-                items = posts if isinstance(posts, list) else posts.get("data", [])
-                for item in items:
-                    comm = item.get("community") or item.get("communityId")
-                    if isinstance(comm, dict) and "_id" in comm:
-                        cid = comm["_id"]
-                        print(f"সাম্প্রতিক পোস্ট থেকে Community ID পাওয়া গেছে: {cid}")
-                        return cid
-                    elif isinstance(comm, str) and re.match(r"^[a-f0-9]{24}$", comm):
-                        print(f"সাম্প্রতিক পোস্ট থেকে Community ID পাওয়া গেছে: {comm}")
-                        return comm
-        except Exception:
-            pass
-
-    print("কমিউনিটি আইডি স্বয়ংক্রিয়ভাবে না পাওয়ায় ডিফল্ট ব্যবহার করা হচ্ছে।")
-    return "Bangladesh"
-
-
-def detect_category(title, body):
-    t = (title + " " + body).lower()
-    if any(
-        w in t
-        for w in "splinterlands game card battle sports quest pack unit".split()
-    ):
-        return "Sports"
-    if any(w in t for w in "photo photography camera nature flower sky".split()):
-        return "Photography"
-    if any(w in t for w in "crypto bitcoin blurt hive token".split()):
-        return "Crypto"
-    if any(w in t for w in "travel tour trip village city".split()):
-        return "Travel"
-    return "Lifestyle"
-
-
-def submit_human_post(title, body, created_date):
-    print("--------------------------------------------------")
-    print(f"[ধাপ ১] ইউজার @{SEREY_USER} হিসেবে লগইন হচ্ছে...")
-    token = get_serey_auth_token()
-    if not token:
-        print("লগইন ব্যর্থ।")
-        return False
-    print("লগইন সফল!")
-
-    print("[ধাপ ২] Bengali Community আইডি খোঁজা হচ্ছে...")
-    comm_id = find_community_id(token)
-    if not comm_id:
-        comm_id = "Bangladesh"
-
-    print("[ধাপ ৩] কন্টেন্ট ও ক্যাটাগরি তৈরি...")
-    cat = detect_category(title, body)
-    date_str = created_date.split("T")[0] if created_date else "1 year ago"
-    full_body = (
-        body
-        + f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
-    )
-
-    headers = dict(BASE_HEADERS)
-    headers["Authorization"] = f"Bearer {token}"
-
-    payload = {
-        "title": title,
-        "content": full_body,
-        "body": full_body,
-        "description": full_body[:150],
-        "categories": cat,
-        "category": cat,
-        "author": SEREY_USER,
-        "community": comm_id,
-        "communityId": comm_id,
-        "platform": "Bangladesh",
-    }
-
-    print(
-        f"[ধাপ ৪] bangladesh.serey.io তে সাবমিট করা হচ্ছে (Category: {cat}, Community: {comm_id})..."
-    )
-    try:
-        res = requests.post(
-            "https://bangladesh.serey.io/api/posts",
-            json=payload,
-            headers=headers,
-            timeout=15,
-        )
-        print(f"সার্ভার স্ট্যাটাস: {res.status_code}")
-        print(f"সার্ভার মেসেজ: {res.text}")
-
-        if res.status_code in [200, 201]:
-            print("অভিনন্দন! সফলভাবে পোস্ট পাবলিশ সম্পন্ন হয়েছে!")
-            return True
-    except Exception as e:
-        print(f"পোস্ট এরর: {e}")
-
-    return False
-
-
-def run():
-    data = load_data()
-    now = time.time()
-
-    valid_timestamps = [t for t in data["timestamps"] if (now - t) < DAY_IN_SECONDS]
-    data["timestamps"] = valid_timestamps
-
-    if len(valid_timestamps) >= MAX_DAILY_POSTS:
-        print(
-            f"আজকের ২৪ ঘণ্টার কোটা পূর্ণ! ({len(valid_timestamps)}/{MAX_DAILY_POSTS})"
-        )
-        save_data(data)
-        return
-
-    if not data["queue"]:
-        print("Blurt থেকে ১ বছর পুরনো পোস্ট সংগ্রহ করা হচ্ছে...")
-        fetched = fetch_one_year_old_posts()
-        new_items = [p for p in fetched if p not in data["posted"]]
-        data["queue"].extend(new_items)
-        save_data(data)
-
-    if not data["queue"]:
-        print("পোস্ট করার মতো কোনো পুরনো পোস্ট অবশিষ্ট নেই।")
-        return
-
-    next_permlink = data["queue"].pop(0)
-    post_info = get_post_details(next_permlink)
-
-    if post_info and post_info.get("title"):
-        title = post_info["title"]
-        body = post_info["body"]
-        created = post_info.get("created", "")
-
-        success = submit_human_post(title, body, created)
-
-        if success:
-            data["posted"].append(next_permlink)
-            data["timestamps"].append(now)
-            save_data(data)
-            print(
-                f"পোস্ট সম্পন্ন! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
-            )
-        else:
-            data["queue"].insert(0, next_permlink)
-            save_data(data)
-    else:
-        print("পোস্টের তথ্য পাওয়া যায়নি।")
-        save_data(data)
-
-
-if __name__ == "__main__":
-    run() 
+                ids = re.findall(r'"(?:_id|community|communityId)"\s*:\s*"([a-f0-9]{24})"', r.text)
+                if ids:
+                    pr
