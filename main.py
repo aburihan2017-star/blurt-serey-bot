@@ -7,8 +7,7 @@ import requests
 
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
-# আপনার GitHub Secret-এ থাকা পাসওয়ার্ড/কি
-SEREY_PASS = os.environ.get("SEREY_POSTING_KEY")
+SEREY_KEY = os.environ.get("SEREY_POSTING_KEY")
 
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
@@ -23,6 +22,7 @@ DAY_IN_SECONDS = 86400
 BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
     "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
     "Referer": "https://bengali.serey.io/login",
     "Origin": "https://bengali.serey.io",
 }
@@ -73,34 +73,28 @@ def get_post_details(permlink):
 
 
 def get_serey_auth_token():
-    """bengali.serey.io থেকে লগইন করে টোকেন সংগ্রহ করা"""
+    """Posting Key দিয়ে Serey থেকে সেশন টোকেন নেওয়া"""
     login_urls = [
+        "https://global-api.serey.io/api/v2/auth/login",
         "https://bengali.serey.io/api/auth/login",
         "https://bengali.serey.io/api/login",
-        "https://bengali.serey.io/api/users/login",
-        "https://global-api.serey.io/api/v2/auth/login",
     ]
 
     payloads = [
-        {"username": SEREY_USER, "password": SEREY_PASS},
-        {"user": SEREY_USER, "password": SEREY_PASS},
-        {"account": SEREY_USER, "key": SEREY_PASS},
+        {"username": SEREY_USER, "password": SEREY_KEY},
+        {"username": SEREY_USER, "posting_key": SEREY_KEY},
+        {"user": SEREY_USER, "password": SEREY_KEY},
     ]
 
     for url in login_urls:
         for p in payloads:
             try:
-                r = requests.post(
-                    url, json=p, headers=BASE_HEADERS, timeout=10
-                )
-                print(f"লগইন টেস্ট ({url}) -> কোড: {r.status_code}")
-                if r.status_code == 200:
+                r = requests.post(url, json=p, headers=BASE_HEADERS, timeout=10)
+                if r.status_code in [200, 201]:
                     data = r.json()
-                    # টোকেন খোঁজা
                     token = (
                         data.get("token")
                         or data.get("accessToken")
-                        or data.get("access_token")
                         or (
                             data.get("data", {}).get("token")
                             if isinstance(data.get("data"), dict)
@@ -108,27 +102,34 @@ def get_serey_auth_token():
                         )
                     )
                     if token:
-                        print("লগইন সফল! টোকেন পাওয়া গেছে।")
+                        print(f"লগইন সফল! ({url})")
                         return token
-            except Exception:
+                else:
+                    print(
+                        f"লগইন চেষ্টা ({url}) -> স্ট্যাটাস: {r.status_code} | সার্ভার মেসেজ: {r.text[:150]}"
+                    )
+            except Exception as e:
                 continue
+
     return None
 
 
 def submit_to_bengali_serey(title, body, category, tags, created_date):
     print(f"bengali.serey.io তে পাঠানো হচ্ছে: {title}")
-    print(f"কমিউনিটি: Bengali Community | ক্যাটাগরি: {category}")
+    print(f"কমিউনিটি: Bengali Community (Bangladesh) | ক্যাটাগরি: {category}")
+
+    token = get_serey_auth_token()
+    if not token:
+        print("লগইন টোকেন পাওয়া যায়নি, পোস্ট পাঠানো স্থগিত করা হলো।")
+        return False
+
+    headers = dict(BASE_HEADERS)
+    headers["Authorization"] = f"Bearer {token}"
+    headers["Referer"] = "https://bengali.serey.io/blog/new"
 
     date_str = created_date.split("T")[0] if created_date else "1 year ago"
     footer = f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
     full_body = body + footer
-
-    # টোকেন নেওয়া
-    token = get_serey_auth_token()
-
-    headers = dict(BASE_HEADERS)
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
     post_url = "https://bengali.serey.io/api/posts"
     post_data = {
@@ -145,14 +146,18 @@ def submit_to_bengali_serey(title, body, category, tags, created_date):
         res = requests.post(
             post_url, json=post_data, headers=headers, timeout=15
         )
-        print(f"পোস্ট রিকোয়েস্ট রেসপন্স: {res.status_code} | {res.text[:200]}")
+        print(f"পোস্ট রেসপন্স: {res.status_code}")
         if res.status_code in [200, 201]:
-            print("অভিনন্দন! সফলভাবে bengali.serey.io তে পোস্ট সম্পন্ন হয়েছে!")
+            print(
+                "অভিনন্দন! সফলভাবে bengali.serey.io তে পোস্ট লাইভ সম্পন্ন হয়েছে!"
+            )
             return True
+        else:
+            print(f"সার্ভার মেসেজ: {res.text}")
     except Exception as e:
-        print(f"পোস্ট রিকোয়েস্টে এরর: {e}")
+        print(f"পোস্ট এরর: {e}")
 
-    return True
+    return False
 
 
 def run():
@@ -163,7 +168,9 @@ def run():
     data["timestamps"] = valid_timestamps
 
     if len(valid_timestamps) >= MAX_DAILY_POSTS:
-        print(f"আজকের ২৪ ঘণ্টার কোটা পূর্ণ! ({len(valid_timestamps)}/2)")
+        print(
+            f"আজকের ২৪ ঘণ্টার কোটা পূর্ণ! ({len(valid_timestamps)}/{MAX_DAILY_POSTS})"
+        )
         save_data(data)
         return
 
@@ -175,7 +182,7 @@ def run():
         save_data(data)
 
     if not data["queue"]:
-        print("পোস্ট করার মতো কোনো পুরনো পোস্ট অবশিষ্ট নেই।")
+        print("পোস্ট করার মতো কোনো পুরনো পোস্ট পাওয়া যায়নি।")
         return
 
     next_permlink = data["queue"].pop(0)
@@ -188,8 +195,9 @@ def run():
         tags = meta.get("tags", [])
         created = post_info.get("created", "")
 
-        category = tags[0] if len(tags) > 0 else "general"
+        category = tags[0] if len(tags) > 0 else "photography"
 
+        # লাইভ পোস্ট চেষ্টা
         success = submit_to_bengali_serey(
             title, body, category, tags, created
         )
@@ -198,7 +206,13 @@ def run():
             data["posted"].append(next_permlink)
             data["timestamps"].append(now)
             save_data(data)
-            print("পোস্ট সম্পন্ন হয়েছে!")
+            print(
+                f"পোস্ট সফল! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
+            )
+        else:
+            # ব্যর্থ হলে যেন কোটা বা পোস্ট নষ্ট না হয়
+            data["queue"].insert(0, next_permlink)
+            save_data(data)
     else:
         print("পোস্টের তথ্য রিড করা যায়নি।")
         save_data(data)
