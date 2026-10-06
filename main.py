@@ -1,27 +1,34 @@
 from datetime import datetime, timedelta
 import json
 import os
+import re
 import time
+from beem import Steem
+from beem.exceptions import AccountDoesNotExistsException
 import requests
 
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
 SEREY_KEY = os.environ.get("SEREY_POSTING_KEY")
 
-# সচল Blurt RPC নোডগুলো
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
     "https://rpc.blurt.one",
     "https://blurt.world",
 ]
+SEREY_NODES = ["https://serey.io", "wss://serey.io"]
 
 DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 86400
 
 
+def get_serey_client():
+    """Serey নেটওয়ার্কে কানেক্ট হওয়া"""
+    return Steem(node=SEREY_NODES, keys=[SEREY_KEY])
+
+
 def blurt_call(method, params):
-    """নোড ডাউন থাকলে অটোমেটিক অন্য নোড চেষ্টা করবে"""
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
     for node in BLURT_NODES:
         try:
@@ -54,7 +61,7 @@ def fetch_one_year_old_posts():
 
     posts = blurt_call(
         "condenser_api.get_discussions_by_author_before_date",
-        [BLURT_USER, "", before_date, 25],
+        [BLURT_USER, "", before_date, 30],
     )
     if posts:
         return [p["permlink"] for p in reversed(posts)]
@@ -65,10 +72,42 @@ def get_post_details(permlink):
     return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
 
 
-def post_to_serey(title, body, category, tags, permlink, created_date):
-    print(f"Serey-তে পোস্ট হচ্ছে: {title}")
+def clean_permlink(title):
+    permlink = re.sub(r"[^a-z0-9\-]+", "", title.lower().replace(" ", "-"))
+    return f"{permlink[:40]}-{int(time.time())}"
+
+
+def post_to_serey(title, body, category, tags, created_date):
+    """বাংলাদেশ কমিউনিটিতে লাইভ পোস্ট ব্রডকাস্ট করা"""
+    print(f"Serey-তে লাইভ পাবলিশ করা হচ্ছে: {title}")
     print(f"কমিউনিটি: Bengali Community (Bangladesh) | ক্যাটাগরি: {category}")
-    return True
+
+    date_str = created_date.split("T")[0] if created_date else "1 year ago"
+    footer = f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
+    full_body = body + footer
+
+    post_permlink = clean_permlink(title)
+    final_tags = list(
+        dict.fromkeys(["bengali-community", "bangladesh", category] + tags[:3])
+    )
+
+    try:
+        serey = get_serey_client()
+        # Serey ব্লকচেইনে বাংলাদেশ কমিউনিটিতে কমেন্ট/পোস্ট অপারেশন
+        serey.post(
+            title=title,
+            body=full_body,
+            author=SEREY_USER,
+            permlink=post_permlink,
+            reply_identifier="bengali-community",
+            tags=final_tags,
+            self_vote=True,
+        )
+        print("Serey ব্লকচেইনে সফলভাবে পোস্ট সাবমিট হয়েছে!")
+        return True
+    except Exception as e:
+        print(f"Serey-তে সাবমিট করার সময় সমস্যা: {e}")
+        return False
 
 
 def run():
@@ -79,19 +118,21 @@ def run():
     data["timestamps"] = valid_timestamps
 
     if len(valid_timestamps) >= MAX_DAILY_POSTS:
-        print(f"আজকের কোটা পূর্ণ! ({len(valid_timestamps)}/{MAX_DAILY_POSTS})")
+        print(
+            f"আজকের ২৪ ঘণ্টার কোটা পূর্ণ! ({len(valid_timestamps)}/{MAX_DAILY_POSTS})"
+        )
         save_data(data)
         return
 
     if not data["queue"]:
-        print("Blurt থেকে ১ বছর পুরনো পোস্ট খোঁজা হচ্ছে...")
+        print("Blurt থেকে ১ বছর পুরনো পোস্ট সংগ্রহ করা হচ্ছে...")
         fetched = fetch_one_year_old_posts()
         new_items = [p for p in fetched if p not in data["posted"]]
         data["queue"].extend(new_items)
         save_data(data)
 
     if not data["queue"]:
-        print("পোস্ট করার মতো কোনো পুরনো পোস্ট পাওয়া যায়নি।")
+        print("পোস্ট করার মতো কোনো পুরনো পোস্ট অবশিষ্ট নেই।")
         return
 
     next_permlink = data["queue"].pop(0)
@@ -104,19 +145,23 @@ def run():
         tags = meta.get("tags", [])
         created = post_info.get("created", "")
 
-        category = tags[0] if len(tags) > 0 else "general"
+        category = tags[0] if len(tags) > 0 else "photography"
 
-        success = post_to_serey(title, body, category, tags, next_permlink, created)
+        success = post_to_serey(title, body, category, tags, created)
 
         if success:
             data["posted"].append(next_permlink)
             data["timestamps"].append(now)
             save_data(data)
             print(
-                f"সফলভাবে পোস্ট সম্পন্ন হয়েছে! (আজকের পোস্ট: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
+                f"পোস্ট সফল! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
             )
+        else:
+            # ব্যর্থ হলে আবার কিউ-তে সামনে রেখে দেওয়া যাতে পরে চেষ্টা করতে পারে
+            data["queue"].insert(0, next_permlink)
+            save_data(data)
     else:
-        print("পোস্টের তথ্য পাওয়া যায়নি, পরবর্তী চেষ্টা করা হবে।")
+        print("পোস্টের তথ্য রিড করা যায়নি, পরবর্তী চেষ্টা করা হবে।")
         save_data(data)
 
 
