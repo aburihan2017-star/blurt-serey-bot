@@ -7,7 +7,8 @@ import requests
 
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
-SEREY_KEY = os.environ.get("SEREY_POSTING_KEY")
+# আপনার GitHub Secret-এ থাকা পাসওয়ার্ড/কি
+SEREY_PASS = os.environ.get("SEREY_POSTING_KEY")
 
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
@@ -19,11 +20,10 @@ DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 86400
 
-# ব্রাউজার হেডার যাতে Cloudflare কোনো বাধা না দেয়
-HEADERS = {
+BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
     "Accept": "application/json, text/plain, */*",
-    "Referer": "https://bengali.serey.io/blog/new",
+    "Referer": "https://bengali.serey.io/login",
     "Origin": "https://bengali.serey.io",
 }
 
@@ -72,8 +72,50 @@ def get_post_details(permlink):
     return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
 
 
+def get_serey_auth_token():
+    """bengali.serey.io থেকে লগইন করে টোকেন সংগ্রহ করা"""
+    login_urls = [
+        "https://bengali.serey.io/api/auth/login",
+        "https://bengali.serey.io/api/login",
+        "https://bengali.serey.io/api/users/login",
+        "https://global-api.serey.io/api/v2/auth/login",
+    ]
+
+    payloads = [
+        {"username": SEREY_USER, "password": SEREY_PASS},
+        {"user": SEREY_USER, "password": SEREY_PASS},
+        {"account": SEREY_USER, "key": SEREY_PASS},
+    ]
+
+    for url in login_urls:
+        for p in payloads:
+            try:
+                r = requests.post(
+                    url, json=p, headers=BASE_HEADERS, timeout=10
+                )
+                print(f"লগইন টেস্ট ({url}) -> কোড: {r.status_code}")
+                if r.status_code == 200:
+                    data = r.json()
+                    # টোকেন খোঁজা
+                    token = (
+                        data.get("token")
+                        or data.get("accessToken")
+                        or data.get("access_token")
+                        or (
+                            data.get("data", {}).get("token")
+                            if isinstance(data.get("data"), dict)
+                            else None
+                        )
+                    )
+                    if token:
+                        print("লগইন সফল! টোকেন পাওয়া গেছে।")
+                        return token
+            except Exception:
+                continue
+    return None
+
+
 def submit_to_bengali_serey(title, body, category, tags, created_date):
-    """সরাসরি bengali.serey.io তে পোস্ট পাঠানো"""
     print(f"bengali.serey.io তে পাঠানো হচ্ছে: {title}")
     print(f"কমিউনিটি: Bengali Community | ক্যাটাগরি: {category}")
 
@@ -81,37 +123,35 @@ def submit_to_bengali_serey(title, body, category, tags, created_date):
     footer = f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
     full_body = body + footer
 
-    # bengali.serey.io এর ব্লগ পোস্ট পে-লোড
+    # টোকেন নেওয়া
+    token = get_serey_auth_token()
+
+    headers = dict(BASE_HEADERS)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    post_url = "https://bengali.serey.io/api/posts"
     post_data = {
         "title": title,
+        "body": full_body,
         "content": full_body,
         "category": category,
+        "community": "bengali-community",
         "tags": ["bengali-community", "bangladesh", category] + tags[:3],
         "author": SEREY_USER,
-        "key": SEREY_KEY,
     }
 
-    # API এন্ডপয়েন্ট চেক করা
-    api_endpoints = [
-        "https://bengali.serey.io/api/blog/create",
-        "https://bengali.serey.io/api/posts",
-        "https://global-api.serey.io/api/v2/posts",
-        "https://global-api.serey.io/api/v1/posts",
-    ]
+    try:
+        res = requests.post(
+            post_url, json=post_data, headers=headers, timeout=15
+        )
+        print(f"পোস্ট রিকোয়েস্ট রেসপন্স: {res.status_code} | {res.text[:200]}")
+        if res.status_code in [200, 201]:
+            print("অভিনন্দন! সফলভাবে bengali.serey.io তে পোস্ট সম্পন্ন হয়েছে!")
+            return True
+    except Exception as e:
+        print(f"পোস্ট রিকোয়েস্টে এরর: {e}")
 
-    for api_url in api_endpoints:
-        try:
-            res = requests.post(
-                api_url, json=post_data, headers=HEADERS, timeout=15
-            )
-            print(f"টেস্টিং এন্ডপয়েন্ট {api_url} -> স্ট্যাটাস কোড: {res.status_code}")
-            if res.status_code in [200, 201]:
-                print("সফলভাবে bengali.serey.io তে পোস্ট পাবলিশ হয়েছে!")
-                return True
-        except Exception as e:
-            print(f"এন্ডপয়েন্ট এরর ({api_url}): {e}")
-
-    # প্রাথমিক সংযোগ তৈরি হলে
     return True
 
 
@@ -158,7 +198,7 @@ def run():
             data["posted"].append(next_permlink)
             data["timestamps"].append(now)
             save_data(data)
-            print("পোস্ট সফলভাবে সম্পন্ন হয়েছে!")
+            print("পোস্ট সম্পন্ন হয়েছে!")
     else:
         print("পোস্টের তথ্য রিড করা যায়নি।")
         save_data(data)
