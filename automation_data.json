@@ -1,6 +1,5 @@
 {
   "queue": [
-    "todays-ranked-battle-a-great",
     "opening-the-3-glid-packs",
     "open-minor-chest-with-glint",
     "obsidian-dreadcore-a-legendary-dragon",
@@ -26,9 +25,11 @@
     "my-new-experience-with-today"
   ],
   "posted": [
-    "gladius-pack-opening-experience-a"
+    "gladius-pack-opening-experience-a",
+    "todays-ranked-battle-a-great"
   ],
   "timestamps": [
-    1791254215.7802134
+    1791254215.7802134,
+    1791255783.7413182
   ]
 }
