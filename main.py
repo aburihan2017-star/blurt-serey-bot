@@ -58,7 +58,6 @@ def save_data(data):
 def fetch_one_year_old_posts():
     one_year_ago = datetime.utcnow() - timedelta(days=365)
     before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
-
     posts = blurt_call(
         "condenser_api.get_discussions_by_author_before_date",
         [BLURT_USER, "", before_date, 30],
@@ -90,77 +89,171 @@ def get_serey_auth_token():
                     else None
                 )
             )
+        else:
+            print(f"লগইন রেসপন্স: {r.status_code}")
     except Exception as e:
         print(f"লগইন এরর: {e}")
     return None
 
 
 def find_community_id(token):
-    """bangladesh.serey.io পেজ থেকে সরাসরি আসল Bengali Community ID রিড করা"""
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
-
-    # ১. পেজ সোর্স থেকে খোঁজা
-    try:
-        page = requests.get(
-            "https://bangladesh.serey.io/blog/new", headers=headers, timeout=10
-        ).text
-        matches = re.findall(
-            r'\{[^{}]*?"name"\s*:\s*"Bengali Community"[^{}]*?\}', page
-        )
-        for m in matches:
-            id_match = re.search(r'"(?:_id|id)"\s*:\s*"([^"]+)"', m)
-            if id_match:
-                cid = id_match.group(1)
-                print(f"পেজ থেকে Bengali Community ID শনাক্ত হয়েছে: {cid}")
-                return cid
-    except Exception:
-        pass
-
-    # ২. সিস্টেম এপিআই এন্ডপয়েন্টগুলো স্ক্যান করা
-    api_urls = [
-        "https://global-api.serey.io/api/v2/communities",
-        "https://global-api.serey.io/api/v2/platforms",
+    urls = [
         "https://bangladesh.serey.io/api/communities",
+        "https://global-api.serey.io/api/v2/communities",
         "https://global-api.serey.io/api/v2/community",
-        "https://global-api.serey.io/api/v2/channels",
     ]
-
-    for url in api_urls:
+    for u in urls:
         try:
-            r = requests.get(url, headers=headers, timeout=8)
-            print(f"সিস্টেম চেক ({url}) -> স্ট্যাটাস: {r.status_code}")
+            r = requests.get(u, headers=headers, timeout=8)
+            print(f"চেক {u} -> স্ট্যাটাস: {r.status_code}")
             if r.status_code == 200:
-                text = r.text
-                print(f"সার্ভার ডাটা নমুনা: {text[:200]}")
-                # Bengali Community খোঁজা
+                print(f"ডাটা নমুনা: {r.text[:200]}")
                 m = re.search(
-                    r'"(?:_id|id)"\s*:\s*"([a-f0-9]{24}|[0-9]+)"[^}]*?"name"\s*:\s*"Bengali Community"',
-                    text,
+                    r'"(?:_id|id)"\s*:\s*"([^"]+)"[^}]*?"name"\s*:\s*"Bengali Community"',
+                    r.text,
                     re.I,
                 )
                 if not m:
                     m = re.search(
-                        r'"name"\s*:\s*"Bengali Community"[^}]*?"(?:_id|id)"\s*:\s*"([a-f0-9]{24}|[0-9]+)"',
-                        text,
+                        r'"name"\s*:\s*"Bengali Community"[^}]*?"(?:_id|id)"\s*:\s*"([^"]+)"',
+                        r.text,
                         re.I,
                     )
                 if m:
                     cid = m.group(1)
-                    print(
-                        f"ডাটাবেজ থেকে আসল Bengali Community ID পাওয়া গেছে: {cid}"
-                    )
+                    print(f"Bengali Community ID পাওয়া গেছে: {cid}")
                     return cid
         except Exception:
-            continue
-
+            pass
     return None
 
 
 def detect_category(title, body):
-    text = (title + " " + body).lower()
+    t = (title + " " + body).lower()
     if any(
-        w in text
-        for w in [
-            "splinterlands",
-            "game",
+        w in t
+        for w in "splinterlands game card battle sports quest pack unit".split()
+    ):
+        return "Sports"
+    if any(w in t for w in "photo photography camera nature flower sky".split()):
+        return "Photography"
+    if any(w in t for w in "crypto bitcoin blurt hive token".split()):
+        return "Crypto"
+    if any(w in t for w in "travel tour trip village city".split()):
+        return "Travel"
+    return "Lifestyle"
+
+
+def submit_human_post(title, body, created_date):
+    print("--------------------------------------------------")
+    print(f"[ধাপ ১] ইউজার @{SEREY_USER} হিসেবে লগইন হচ্ছে...")
+    token = get_serey_auth_token()
+    if not token:
+        print("লগইন ব্যর্থ।")
+        return False
+    print("লগইন সফল!")
+
+    print("[ধাপ ২] Bengali Community আইডি খোঁজা হচ্ছে...")
+    comm_id = find_community_id(token)
+
+    print("[ধাপ ৩] কন্টেন্ট ও ক্যাটাগরি তৈরি...")
+    cat = detect_category(title, body)
+    date_str = created_date.split("T")[0] if created_date else "1 year ago"
+    full_body = (
+        body
+        + f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
+    )
+
+    headers = dict(BASE_HEADERS)
+    headers["Authorization"] = f"Bearer {token}"
+
+    payload = {
+        "title": title,
+        "content": full_body,
+        "body": full_body,
+        "description": full_body[:150],
+        "categories": cat,
+        "category": cat,
+        "author": SEREY_USER,
+    }
+    if comm_id:
+        payload["community"] = comm_id
+        payload["communityId"] = comm_id
+        payload["platform"] = "Bangladesh"
+
+    print(
+        f"[ধাপ ৪] bangladesh.serey.io তে সাবমিট করা হচ্ছে (Category: {cat})..."
+    )
+    try:
+        res = requests.post(
+            "https://bangladesh.serey.io/api/posts",
+            json=payload,
+            headers=headers,
+            timeout=15,
+        )
+        print(f"সার্ভার স্ট্যাটাস: {res.status_code}")
+        print(f"সার্ভার মেসেজ: {res.text}")
+
+        if res.status_code in [200, 201]:
+            print("অভিনন্দন! সফলভাবে পোস্ট পাবলিশ সম্পন্ন হয়েছে!")
+            return True
+    except Exception as e:
+        print(f"পোস্ট এরর: {e}")
+
+    return False
+
+
+def run():
+    data = load_data()
+    now = time.time()
+
+    valid_timestamps = [t for t in data["timestamps"] if (now - t) < DAY_IN_SECONDS]
+    data["timestamps"] = valid_timestamps
+
+    if len(valid_timestamps) >= MAX_DAILY_POSTS:
+        print(
+            f"আজকের ২৪ ঘণ্টার কোটা পূর্ণ! ({len(valid_timestamps)}/{MAX_DAILY_POSTS})"
+        )
+        save_data(data)
+        return
+
+    if not data["queue"]:
+        print("Blurt থেকে ১ বছর পুরনো পোস্ট সংগ্রহ করা হচ্ছে...")
+        fetched = fetch_one_year_old_posts()
+        new_items = [p for p in fetched if p not in data["posted"]]
+        data["queue"].extend(new_items)
+        save_data(data)
+
+    if not data["queue"]:
+        print("পোস্ট করার মতো কোনো পুরনো পোস্ট অবশিষ্ট নেই।")
+        return
+
+    next_permlink = data["queue"].pop(0)
+    post_info = get_post_details(next_permlink)
+
+    if post_info and post_info.get("title"):
+        title = post_info["title"]
+        body = post_info["body"]
+        created = post_info.get("created", "")
+
+        success = submit_human_post(title, body, created)
+
+        if success:
+            data["posted"].append(next_permlink)
+            data["timestamps"].append(now)
+            save_data(data)
+            print(
+                f"পোস্ট সম্পন্ন! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
+            )
+        else:
+            data["queue"].insert(0, next_permlink)
+            save_data(data)
+    else:
+        print("পোস্টের তথ্য পাওয়া যায়নি।")
+        save_data(data)
+
+
+if __name__ == "__main__":
+    run()
