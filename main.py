@@ -96,10 +96,60 @@ def get_serey_auth_token():
     return None
 
 
-def detect_category(title, content):
-    """পোস্টের লেখা পড়ে সঠিক Serey ক্যাটাগরি স্ট্রিং নির্বাচন"""
-    text = (title + " " + content).lower()
+def get_community_id(headers):
+    """বাংলাদেশ কমিউনিটির সঠিক আসল আইডি সার্ভার থেকে খুঁজে বের করা"""
+    # মেথড ১: পোস্টের নমুনা থেকে রিড করা
+    try:
+        r = requests.get(
+            "https://bangladesh.serey.io/api/posts?limit=1",
+            headers=headers,
+            timeout=10,
+        )
+        if r.status_code == 200:
+            posts = r.json()
+            items = (
+                posts.get("data")
+                if isinstance(posts, dict) and "data" in posts
+                else posts
+            )
+            if isinstance(items, list) and len(items) > 0:
+                comm = items[0].get("community")
+                if isinstance(comm, dict):
+                    cid = comm.get("_id") or comm.get("id")
+                    if cid:
+                        print(f"পোস্ট থেকে Community ID পাওয়া গেছে: {cid}")
+                        return cid
+                elif isinstance(comm, str):
+                    print(f"পোস্ট থেকে Community ID পাওয়া গেছে: {comm}")
+                    return comm
+    except Exception:
+        pass
 
+    # মেথড ২: অফিশিয়াল কমিউনিটি তালিকা থেকে খোঁজা
+    try:
+        r2 = requests.get(
+            "https://global-api.serey.io/api/v2/communities",
+            headers=headers,
+            timeout=10,
+        )
+        if r2.status_code == 200:
+            c_data = r2.json()
+            c_list = c_data.get("data") if isinstance(c_data, dict) else c_data
+            if isinstance(c_list, list):
+                for c in c_list:
+                    name = str(c.get("name", "")).lower()
+                    if "bangladesh" in name or "bengali" in name:
+                        cid = c.get("_id") or c.get("id")
+                        print(f"লিস্ট থেকে Bangladesh Community ID: {cid}")
+                        return cid
+    except Exception:
+        pass
+
+    return "bengali-community"
+
+
+def detect_category(title, content):
+    text = (title + " " + content).lower()
     if any(
         w in text
         for w in [
@@ -135,10 +185,8 @@ def detect_category(title, content):
         return "travel"
     elif any(w in text for w in ["art", "drawing", "paint", "craft", "design"]):
         return "art"
-    elif any(w in text for w in ["life", "routine", "story", "my day"]):
-        return "lifestyle"
     else:
-        return "general"
+        return "lifestyle"
 
 
 def submit_to_bangladesh_serey(title, body, created_date):
@@ -149,33 +197,31 @@ def submit_to_bangladesh_serey(title, body, created_date):
         print("লগইন টোকেন পাওয়া যায়নি।")
         return False
 
-    # ক্যাটাগরি স্বয়ংক্রিয়ভাবে নির্ধারণ (String হিসেবে)
-    chosen_category = detect_category(title, body)
-    print(f"পোস্টের জন্য নির্ধারিত ক্যাটাগরি (String): {chosen_category}")
+    headers = dict(BASE_HEADERS)
+    headers["Authorization"] = f"Bearer {token}"
 
-    # সোর্স ক্রেডিট
+    # বাংলাদেশ কমিউনিটির সঠিক আইডি নেওয়া
+    community_id = get_community_id(headers)
+    chosen_category = detect_category(title, body)
+    print(f"কমিউনিটি: {community_id} | ক্যাটাগরি: {chosen_category}")
+
     date_str = created_date.split("T")[0] if created_date else "1 year ago"
     footer = f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
     full_body = body + footer
-
-    headers = dict(BASE_HEADERS)
-    headers["Authorization"] = f"Bearer {token}"
 
     post_urls = [
         "https://bangladesh.serey.io/api/posts",
         "https://bengali.serey.io/api/posts",
     ]
 
-    # সার্ভারের নির্দেশ অনুযায়ী 'categories' এখন বিশুদ্ধ string
     post_payload = {
         "title": title,
         "content": full_body,
         "body": full_body,
         "description": full_body[:150],
-        "categories": chosen_category,  # String format
+        "categories": chosen_category,
         "category": chosen_category,
-        "community": "bangladesh",
-        "platform": "bangladesh",
+        "community": community_id,
         "author": SEREY_USER,
     }
 
