@@ -7,7 +7,7 @@ import requests
 
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
-SEREY_KEY = os.environ.get("SEREY_POSTING_KEY")
+SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
 
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
@@ -23,8 +23,8 @@ BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
-    "Referer": "https://bengali.serey.io/login",
-    "Origin": "https://bengali.serey.io",
+    "Referer": "https://bangladesh.serey.io/blog/new",
+    "Origin": "https://bangladesh.serey.io",
 }
 
 
@@ -73,89 +73,154 @@ def get_post_details(permlink):
 
 
 def get_serey_auth_token():
-    """Posting Key দিয়ে Serey থেকে সেশন টোকেন নেওয়া"""
-    login_urls = [
-        "https://global-api.serey.io/api/v2/auth/login",
-        "https://bengali.serey.io/api/auth/login",
-        "https://bengali.serey.io/api/login",
-    ]
+    """global-api.serey.io থেকে লগইন করে টোকেন সংগ্রহ"""
+    login_url = "https://global-api.serey.io/api/v2/auth/login"
+    payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
 
-    payloads = [
-        {"username": SEREY_USER, "password": SEREY_KEY},
-        {"username": SEREY_USER, "posting_key": SEREY_KEY},
-        {"user": SEREY_USER, "password": SEREY_KEY},
-    ]
-
-    for url in login_urls:
-        for p in payloads:
-            try:
-                r = requests.post(url, json=p, headers=BASE_HEADERS, timeout=10)
-                if r.status_code in [200, 201]:
-                    data = r.json()
-                    token = (
-                        data.get("token")
-                        or data.get("accessToken")
-                        or (
-                            data.get("data", {}).get("token")
-                            if isinstance(data.get("data"), dict)
-                            else None
-                        )
-                    )
-                    if token:
-                        print(f"লগইন সফল! ({url})")
-                        return token
-                else:
-                    print(
-                        f"লগইন চেষ্টা ({url}) -> স্ট্যাটাস: {r.status_code} | সার্ভার মেসেজ: {r.text[:150]}"
-                    )
-            except Exception as e:
-                continue
-
+    try:
+        r = requests.post(
+            login_url, json=payload, headers=BASE_HEADERS, timeout=15
+        )
+        if r.status_code in [200, 201]:
+            data = r.json()
+            token = (
+                data.get("token")
+                or data.get("accessToken")
+                or (
+                    data.get("data", {}).get("token")
+                    if isinstance(data.get("data"), dict)
+                    else None
+                )
+            )
+            return token
+    except Exception as e:
+        print(f"লগইন কানেকশন এরর: {e}")
     return None
 
 
-def submit_to_bengali_serey(title, body, category, tags, created_date):
-    print(f"bengali.serey.io তে পাঠানো হচ্ছে: {title}")
-    print(f"কমিউনিটি: Bengali Community (Bangladesh) | ক্যাটাগরি: {category}")
+def get_serey_categories(token):
+    """Serey-র অফিশিয়াল ক্যাটাগরি তালিকা ড্রপডাউন থেকে রিড করা"""
+    cat_urls = [
+        "https://global-api.serey.io/api/v2/categories",
+        "https://bangladesh.serey.io/api/categories",
+        "https://global-api.serey.io/api/v1/categories",
+    ]
+    headers = dict(BASE_HEADERS)
+    headers["Authorization"] = f"Bearer {token}"
+
+    for url in cat_urls:
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                cats = (
+                    data.get("data")
+                    if isinstance(data, dict) and "data" in data
+                    else data
+                )
+                if isinstance(cats, list) and len(cats) > 0:
+                    return cats
+        except Exception:
+            continue
+    return []
+
+
+def select_best_category(title, content, categories):
+    """পোস্টের ধরন অনুযায়ী ক্যাটাগরি এবং সাব-ক্যাটাগরি স্বয়ংক্রিয়ভাবে নির্ধারণ"""
+    text_lower = (title + " " + content).lower()
+
+    # সাধারণ ক্যাটাগরি কি-ওয়ার্ড ম্যাপিং
+    keywords = {
+        "photography": ["photo", "camera", "picture", "nature", "flower", "shot"],
+        "gaming": ["game", "splinterlands", "battle", "card", "play", "pack"],
+        "lifestyle": ["life", "day", "routine", "my", "family", "personal"],
+        "technology": ["tech", "software", "code", "ai", "computer", "phone"],
+        "crypto": ["bitcoin", "crypto", "blockchain", "blurt", "serey", "token"],
+        "entertainment": ["movie", "song", "music", "fun", "drama"],
+    }
+
+    if not categories:
+        return None
+
+    # ১. পোস্টের বিষয়বস্তুর সাথে সবচেয়ে বেশি মেলার ক্যাটাগরি খোঁজা
+    for cat in categories:
+        cat_name = (
+            cat.get("name", "") if isinstance(cat, dict) else str(cat)
+        ).lower()
+        for group, words in keywords.items():
+            if any(w in text_lower for w in words):
+                if group in cat_name or cat_name in group:
+                    return cat
+
+    # ২. মিল না পেলে ড্রপডাউনের ১ম/সাধারণ ক্যাটাগরি নেওয়া
+    return categories[0]
+
+
+def submit_to_bangladesh_serey(title, body, created_date):
+    print(f"bangladesh.serey.io তে পোস্ট প্রস্তুত হচ্ছে: {title}")
 
     token = get_serey_auth_token()
     if not token:
-        print("লগইন টোকেন পাওয়া যায়নি, পোস্ট পাঠানো স্থগিত করা হলো।")
+        print("লগইন টোকেন পাওয়া যায়নি।")
         return False
 
-    headers = dict(BASE_HEADERS)
-    headers["Authorization"] = f"Bearer {token}"
-    headers["Referer"] = "https://bengali.serey.io/blog/new"
+    print("লগইন সফল! Serey ক্যাটাগরি ড্রপডাউন লোড করা হচ্ছে...")
+    categories = get_serey_categories(token)
 
+    # ক্যাটাগরি ও সাব-ক্যাটাগরি অবজেক্ট তৈরি
+    chosen_cat = select_best_category(title, body, categories)
+
+    cat_id = None
+    sub_cat_id = None
+
+    if isinstance(chosen_cat, dict):
+        cat_id = chosen_cat.get("id") or chosen_cat.get("_id")
+        sub_cats = chosen_cat.get("subCategories", [])
+        if sub_cats and isinstance(sub_cats[0], dict):
+            sub_cat_id = sub_cats[0].get("id") or sub_cats[0].get("_id")
+        elif sub_cats:
+            sub_cat_id = sub_cats[0]
+        print(f"নির্বাচিত Serey ক্যাটাগরি: {chosen_cat.get('name')}")
+    else:
+        print("ক্যাটাগরি লোড করা হয়েছে।")
+
+    # সোর্স ক্রেডিট
     date_str = created_date.split("T")[0] if created_date else "1 year ago"
     footer = f"\n\n---\n*Originally written and published on Blurt by @{BLURT_USER} on {date_str}*"
     full_body = body + footer
 
-    post_url = "https://bengali.serey.io/api/posts"
-    post_data = {
+    headers = dict(BASE_HEADERS)
+    headers["Authorization"] = f"Bearer {token}"
+
+    post_url = "https://global-api.serey.io/api/v2/posts"
+
+    # ব্রাউজারের মতো সম্পূর্ণ ফর্ম ডাটা পে-লোড
+    post_payload = {
         "title": title,
-        "body": full_body,
         "content": full_body,
-        "category": category,
-        "community": "bengali-community",
-        "tags": ["bengali-community", "bangladesh", category] + tags[:3],
+        "description": full_body[:150],
+        "community": "bangladesh",
+        "platform": "bangladesh",
+        "categories": [cat_id] if cat_id else [],
+        "category": cat_id,
+        "subCategory": sub_cat_id,
         "author": SEREY_USER,
     }
 
     try:
         res = requests.post(
-            post_url, json=post_data, headers=headers, timeout=15
+            post_url, json=post_payload, headers=headers, timeout=15
         )
-        print(f"পোস্ট রেসপন্স: {res.status_code}")
+        print(f"পোস্ট রেসপন্স স্ট্যাটাস: {res.status_code}")
+        print(f"সার্ভার মেসেজ: {res.text}")
+
         if res.status_code in [200, 201]:
             print(
-                "অভিনন্দন! সফলভাবে bengali.serey.io তে পোস্ট লাইভ সম্পন্ন হয়েছে!"
+                "অভিনন্দন! সফলভাবে bangladesh.serey.io তে ক্যাটাগরি সহ পোস্ট লাইভ পাবলিশ হয়েছে!"
             )
             return True
-        else:
-            print(f"সার্ভার মেসেজ: {res.text}")
     except Exception as e:
-        print(f"পোস্ট এরর: {e}")
+        print(f"পোস্ট সাবমিট এরর: {e}")
 
     return False
 
@@ -191,26 +256,18 @@ def run():
     if post_info and post_info.get("title"):
         title = post_info["title"]
         body = post_info["body"]
-        meta = json.loads(post_info.get("json_metadata", "{}"))
-        tags = meta.get("tags", [])
         created = post_info.get("created", "")
 
-        category = tags[0] if len(tags) > 0 else "photography"
-
-        # লাইভ পোস্ট চেষ্টা
-        success = submit_to_bengali_serey(
-            title, body, category, tags, created
-        )
+        success = submit_to_bangladesh_serey(title, body, created)
 
         if success:
             data["posted"].append(next_permlink)
             data["timestamps"].append(now)
             save_data(data)
             print(
-                f"পোস্ট সফল! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
+                f"পোস্ট সম্পন্ন! (আজকের পোস্ট সংখ্যা: {len(data['timestamps'])}/{MAX_DAILY_POSTS})"
             )
         else:
-            # ব্যর্থ হলে যেন কোটা বা পোস্ট নষ্ট না হয়
             data["queue"].insert(0, next_permlink)
             save_data(data)
     else:
