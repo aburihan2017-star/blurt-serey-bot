@@ -115,10 +115,11 @@ def post_to_serey(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    # ধাপ ১: ড্রাফট তৈরি করা
+    # ধাপ ১: ড্রাফট তৈরি করা (ব্লগের বডি 'posts' ফিল্ডে যাবে)
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
     draft_payload = {
         "title": title,
+        "posts": body,
         "body": body,
         "community": COMMUNITY_NAME,
         "community_id": COMMUNITY_ID,
@@ -132,7 +133,7 @@ def post_to_serey(token, title, body, tags=None):
 
         if r.status_code in [200, 201]:
             res_data = r.json()
-            # রেসপন্স থেকে ড্রাফট আইডি বের করা
+            # রেসপন্স থেকে ড্রাফট আইডি নেওয়া
             draft_id = (
                 res_data.get("_id")
                 or res_data.get("id")
@@ -141,28 +142,24 @@ def post_to_serey(token, title, body, tags=None):
             )
 
             if not draft_id:
-                print("ড্রাফট তৈরি হয়েছে, সরাসরি পাবলিশ সম্পন্ন বলে ধরে নেওয়া হলো।")
-                return True
+                print("ড্রাফট তৈরি হয়েছে, কিন্তু আইডি মেলেনি। রেসপন্স:", res_data)
+                return False
 
-            print(f"ড্রাফট আইডি পাওয়া গেছে: {draft_id}। ধাপ ২: লাইভ পাবলিশ করা হচ্ছে...")
+            print(f"ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
+            print("ধাপ ২: লাইভ পাবলিশ করা হচ্ছে...")
 
-            # ধাপ ২: ড্রাফটটি লাইভ পাবলিশ করা
+            # ধাপ ২: ড্রাফটটি লাইভ পাবলিশ করা (আসল ফাংশন অনুযায়ী খালি বডি {} দিয়ে)
             publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
-            pr = requests.post(publish_url, json={"id": draft_id}, headers=headers, timeout=35)
+            pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
             print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
 
             if pr.status_code in [200, 201]:
-                print(f"✅ পোস্ট সফলভাবে লাইভ পাবলিশ হয়েছে: {title}")
+                print(f"🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
                 return True
             else:
-                # বিকল্প পাবলিশ পাথ ট্রাই করা
-                publish_alt = "https://global-api.serey.io/api/v2/draft-post/publish-by-id"
-                pr2 = requests.post(publish_alt, json={"id": draft_id}, headers=headers, timeout=35)
-                if pr2.status_code in [200, 201]:
-                    print(f"✅ পোস্ট সফলভাবে লাইভ পাবলিশ হয়েছে: {title}")
-                    return True
+                print(f"❌ পাবলিশে সমস্যা: {pr.text}")
         else:
-            print(f"❌ ড্রাফট তৈরি ব্যর্থ হয়েছে: {r.text}")
+            print(f"❌ ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
     except Exception as e:
         print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
 
