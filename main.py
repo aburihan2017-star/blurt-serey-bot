@@ -105,7 +105,7 @@ def get_serey_auth():
 
 
 def fetch_bengali_categories():
-    """স্বয়ংক্রিয়ভাবে বাংলা কমিউনিটির ক্যাটাগরি তালিকা নিয়ে আসা"""
+    """স্বয়ংক্রিয়ভাবে বাংলা কমিউনিটির ক্যাটাগরি নিয়ে আসা"""
     url = "https://global-api.serey.io/api/v2/category/list-by-community?community=Bengali+Community"
     try:
         r = requests.get(url, headers=BASE_HEADERS, timeout=15)
@@ -114,7 +114,6 @@ def fetch_bengali_categories():
             if isinstance(cats, dict) and "data" in cats:
                 cats = cats["data"]
             if isinstance(cats, list) and len(cats) > 0:
-                print(f"✅ বাংলা কমিউনিটির {len(cats)}টি ক্যাটাগরি পাওয়া গেছে।")
                 return cats
     except Exception as e:
         print(f"ক্যাটাগরি আনতে সমস্যা: {e}")
@@ -122,7 +121,7 @@ def fetch_bengali_categories():
 
 
 def extract_id(d):
-    """রেসপন্স থেকে ড্রাফট আইডি বের করার ফাংশন"""
+    """রেসপন্স থেকে ড্রাফট আইডি বের করার নিরাপদ ফাংশন"""
     if not isinstance(d, dict):
         return None
     for key in ["_id", "id", "draftId", "draft_id"]:
@@ -153,33 +152,26 @@ def post_to_serey(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    # ১. লাইভ ক্যাটাগরি সংগ্রহ
+    # ক্যাটাগরি সংগ্রহ করে স্ট্রিং তালিকা প্রস্তুত
     categories_data = fetch_bengali_categories()
-    
-    # ক্যাটাগরির সম্ভাব্য মান তৈরি (আইডি, নাম, বা অবজেক্ট)
-    cat_id = None
-    cat_name = "others"
-    first_cat_obj = None
+    candidate_cat_strings = []
 
     if categories_data:
         first = categories_data[0]
-        first_cat_obj = first
-        cat_id = first.get("_id") or first.get("id")
-        cat_name = first.get("slug") or first.get("name") or "others"
+        c_id = first.get("_id") or first.get("id")
+        c_name = first.get("slug") or first.get("name")
+        if c_id:
+            candidate_cat_strings.append(str(c_id))
+        if c_name:
+            candidate_cat_strings.append(str(c_name))
 
-    # categories ফিল্ডের সম্ভাব্য ৩টি ফরম্যাট (যাতে কোনো ভ্যালিডেশন মিস না হয়)
-    candidate_category_values = []
-    if cat_id:
-        candidate_category_values.append([cat_id])  # [ObjectId] ফরম্যাট
-    if cat_name:
-        candidate_category_values.append([cat_name])  # ["others"] ফরম্যাট
-    if first_cat_obj:
-        candidate_category_values.append([first_cat_obj])  # [Object] ফরম্যাট
-    candidate_category_values.append(["general"])
+    for fallback in ["others", "general", "news", "society", "lifestyle"]:
+        if fallback not in candidate_cat_strings:
+            candidate_cat_strings.append(fallback)
 
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
 
-    for idx, cat_val in enumerate(candidate_category_values, 1):
+    for idx, cat_str in enumerate(candidate_cat_strings, 1):
         draft_payload = {
             "title": title,
             "community": COMMUNITY_NAME,
@@ -191,7 +183,7 @@ def post_to_serey(token, title, body, tags=None):
                     "body": body,
                     "posts": body,
                     "tags": final_tags,
-                    "categories": cat_val,
+                    "categories": cat_str,  # <--- এবার সরাসরি STRING দেওয়া হলো!
                     "community": COMMUNITY_NAME,
                     "community_id": COMMUNITY_ID,
                 }
@@ -199,7 +191,7 @@ def post_to_serey(token, title, body, tags=None):
         }
 
         try:
-            print(f"ধাপ ১: ড্রাফট তৈরি চেষ্টা (ক্যাটাগরি ফরম্যাট #{idx})...")
+            print(f"ধাপ ১: ড্রাফট তৈরি চেষ্টা (ক্যাটাগরি: '{cat_str}')...")
             r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
             print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
@@ -214,7 +206,7 @@ def post_to_serey(token, title, body, tags=None):
                 print(f"✅ ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
                 print("ধাপ ২: লাইভ পাবলিশ করা হচ্ছে...")
 
-                # ধাপ ২: ড্রাফট লাইভ পাবলিশ (খালি অবজেক্ট {} সহ)
+                # ধাপ ২: ড্রাফট লাইভ পাবলিশ (publishDraftPostById)
                 publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
                 pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
                 print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
@@ -226,7 +218,7 @@ def post_to_serey(token, title, body, tags=None):
                     print(f"❌ পাবলিশে সমস্যা: {pr.text}")
                     return False
             else:
-                print(f"ক্যাটাগরি ফরম্যাট #{idx} গ্রহণ করেনি, পরবর্তী ফরম্যাট চেষ্টা করা হচ্ছে...")
+                print(f"ক্যাটাগরি '{cat_str}' গ্রহণ করেনি, পরবর্তী ক্যাটাগরি দেখা হচ্ছে...")
         except Exception as e:
             print(f"রিকোয়েস্ট এরর: {e}")
 
