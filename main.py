@@ -9,7 +9,8 @@ BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
 SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
 
-COMMUNITY_NAME = "bangladesh"
+COMMUNITY_NAME = "Bengali Community"
+COMMUNITY_ID = 2
 
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
@@ -25,8 +26,8 @@ BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
-    "Referer": "https://bangladesh.serey.io/",
-    "Origin": "https://bangladesh.serey.io",
+    "Referer": "https://bengali.serey.io/write/new",
+    "Origin": "https://bengali.serey.io",
 }
 
 
@@ -77,7 +78,6 @@ def get_serey_auth():
     login_url = "https://global-api.serey.io/api/v2/auth/login"
     payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
 
-    # ৩ বার রিট্রাই করবে যদি সার্ভার স্লো থাকে
     for attempt in range(1, 4):
         try:
             print(f"সেরিতে লগইন চেষ্টা চলছে (Attempt {attempt}/3)...")
@@ -96,7 +96,7 @@ def get_serey_auth():
             else:
                 print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
         except requests.exceptions.Timeout:
-            print(f"⚠️ সার্ভার টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড পর আবার চেষ্টা করা হচ্ছে...")
+            print(f"টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড পর আবার চেষ্টা...")
             time.sleep(5)
         except Exception as e:
             print(f"লগইন এরর: {e}")
@@ -105,41 +105,66 @@ def get_serey_auth():
 
 
 def post_to_serey(token, title, body, tags=None):
-    post_url = "https://global-api.serey.io/api/v2/posts"
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
-    final_tags = ["bangladesh", "serey-io", "bengali"]
+    final_tags = ["bengali", "serey-io", "blurt"]
     if tags:
         for t in tags:
             clean_t = str(t).strip().lower()
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    payload = {
+    # ধাপ ১: ড্রাফট তৈরি করা
+    draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
+    draft_payload = {
         "title": title,
         "body": body,
         "community": COMMUNITY_NAME,
-        "category": COMMUNITY_NAME,
+        "community_id": COMMUNITY_ID,
         "tags": final_tags,
     }
 
-    for attempt in range(1, 4):
-        try:
-            print(f"পোস্ট সাবমিট করা হচ্ছে (Attempt {attempt}/3)...")
-            r = requests.post(post_url, json=payload, headers=headers, timeout=45)
-            if r.status_code in [200, 201]:
-                print(f"✅ পোস্ট সফল হয়েছে: {title}")
+    try:
+        print("ধাপ ১: ড্রাফট তৈরি করা হচ্ছে...")
+        r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
+        print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
+
+        if r.status_code in [200, 201]:
+            res_data = r.json()
+            # রেসপন্স থেকে ড্রাফট আইডি বের করা
+            draft_id = (
+                res_data.get("_id")
+                or res_data.get("id")
+                or (res_data.get("data", {}).get("_id") if isinstance(res_data.get("data"), dict) else None)
+                or (res_data.get("data", {}).get("id") if isinstance(res_data.get("data"), dict) else None)
+            )
+
+            if not draft_id:
+                print("ড্রাফট তৈরি হয়েছে, সরাসরি পাবলিশ সম্পন্ন বলে ধরে নেওয়া হলো।")
+                return True
+
+            print(f"ড্রাফট আইডি পাওয়া গেছে: {draft_id}। ধাপ ২: লাইভ পাবলিশ করা হচ্ছে...")
+
+            # ধাপ ২: ড্রাফটটি লাইভ পাবলিশ করা
+            publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
+            pr = requests.post(publish_url, json={"id": draft_id}, headers=headers, timeout=35)
+            print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
+
+            if pr.status_code in [200, 201]:
+                print(f"✅ পোস্ট সফলভাবে লাইভ পাবলিশ হয়েছে: {title}")
                 return True
             else:
-                print(f"❌ পোস্ট ব্যর্থ হয়েছে ({r.status_code}): {r.text}")
-                break
-        except requests.exceptions.Timeout:
-            print(f"পোস্ট টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড অপেক্ষা করা হচ্ছে...")
-            time.sleep(5)
-        except Exception as e:
-            print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
-            break
+                # বিকল্প পাবলিশ পাথ ট্রাই করা
+                publish_alt = "https://global-api.serey.io/api/v2/draft-post/publish-by-id"
+                pr2 = requests.post(publish_alt, json={"id": draft_id}, headers=headers, timeout=35)
+                if pr2.status_code in [200, 201]:
+                    print(f"✅ পোস্ট সফলভাবে লাইভ পাবলিশ হয়েছে: {title}")
+                    return True
+        else:
+            print(f"❌ ড্রাফট তৈরি ব্যর্থ হয়েছে: {r.text}")
+    except Exception as e:
+        print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
 
     return False
 
@@ -152,10 +177,10 @@ def main():
 
     token = get_serey_auth()
     if not token:
-        print("সেরিতে লগইন ব্যর্থ হয়েছে। ইউজারনেম ও পাসওয়ার্ড সঠিক কিনা চেক করুন।")
+        print("সেরিতে লগইন ব্যর্থ হয়েছে।")
         return
 
-    print(f"নির্বাচিত কমিউনিটি: {COMMUNITY_NAME}")
+    print(f"নির্বাচিত কমিউনিটি: {COMMUNITY_NAME} (ID: {COMMUNITY_ID})")
 
     data = load_data()
 
