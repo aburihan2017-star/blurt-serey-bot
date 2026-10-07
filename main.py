@@ -8,6 +8,8 @@ import requests
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
 SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
+# যদি কোনো নির্দিষ্ট কমিউনিটি আইডি থাকে তবে এটি ব্যবহার করবে
+CUSTOM_COMMUNITY_ID = os.environ.get("SEREY_COMMUNITY_ID", "").strip()
 
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
@@ -81,17 +83,16 @@ def get_serey_auth():
             token = (
                 data.get("token")
                 or data.get("accessToken")
-                or (
-                    data.get("data", {}).get("token")
-                    if isinstance(data.get("data"), dict)
-                    else None
-                )
+                or (data.get("data", {}).get("token") if isinstance(data.get("data"), dict) else None)
             )
-            comm_from_login = None
+            print("সেরিতে সফলভাবে লগইন হয়েছে!")
+
+            # লগইন রেসপন্স থেকে কমিউনিটি আইডি খোঁজা
+            comm_found = None
             m = re.search(r'"(?:community|_community|communityId)"\s*:\s*"([a-f0-9]{24})"', r.text)
             if m:
-                comm_from_login = m.group(1)
-            return token, comm_from_login
+                comm_found = m.group(1)
+            return token, comm_found
         else:
             print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
     except Exception as e:
@@ -100,6 +101,10 @@ def get_serey_auth():
 
 
 def find_community_id(token, fallback_id=None):
+    if CUSTOM_COMMUNITY_ID:
+        print(f"GitHub Secrets / কনফিগ থেকে কমিউনিটি আইডি ব্যবহার করা হচ্ছে: {CUSTOM_COMMUNITY_ID}")
+        return CUSTOM_COMMUNITY_ID
+
     if fallback_id:
         print(f"লগইন ডাটা থেকে কমিউনিটি আইডি পাওয়া গেছে: {fallback_id}")
         return fallback_id
@@ -110,7 +115,6 @@ def find_community_id(token, fallback_id=None):
         "Authorization": f"Bearer {token}",
     })
 
-    # ১. blog/new পেজ স্ক্র্যাপ করে আইডি খোঁজা
     web_pages = [
         "https://bangladesh.serey.io/blog/new",
         "https://bangladesh.serey.io",
@@ -118,49 +122,26 @@ def find_community_id(token, fallback_id=None):
     for page in web_pages:
         try:
             r = session.get(page, timeout=10)
-            print(f"চেক পেজ {page} -> স্ট্যাটাস: {r.status_code}")
             if r.status_code == 200:
                 text = r.text
-                m = re.search(r'"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"[^}]*?"(?:name|title)"\s*:\s*"[^"]*Bengali[^"]*"', text, re.I)
-                if not m:
-                    m = re.search(r'"(?:name|title)"\s*:\s*"[^"]*Bengali[^"]*"[^}]*?"(?:_id|id)"\s*:\s*"([a-f0-9]{24})"', text, re.I)
-                if not m:
-                    m = re.search(r'"community(?:Id)?"\s*:\s*"([a-f0-9]{24})"', text)
-                if not m:
-                    m_next = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text)
-                    if m_next:
-                        ids = re.findall(r'"_id"\s*:\s*"([a-f0-9]{24})"', m_next.group(1))
-                        if ids:
-                            print(f"NEXT_DATA থেকে কমিউনিটি আইডি পাওয়া গেছে: {ids[0]}")
-                            return ids[0]
 
-                if m:
-                    cid = m.group(1)
-                    print(f"ওয়েবপেজ থেকে Bengali Community ID পাওয়া গেছে: {cid}")
-                    return cid
+                # পেজ স্ক্রিপ্ট থেকে সরাসরি যে কোনো ২৪ ক্যারেক্টারের ObjectId খোঁজা
+                ids = re.findall(r'"(?:_id|communityId|community)"\s*:\s*"([a-f0-9]{24})"', text)
+                if ids:
+                    print(f"ওয়েবপেজ থেকে কমিউনিটি আইডি পাওয়া গেছে: {ids[0]}")
+                    return ids[0]
+
+                # যদি ২৪ অক্ষরের কোনো সাধারণ আইডি পাওয়া যায়
+                all_hex_ids = re.findall(r'[a-f0-9]{24}', text)
+                if all_hex_ids:
+                    print(f"পেজ থেকে সম্ভাব্য আইডি পাওয়া গেছে: {all_hex_ids[0]}")
+                    return all_hex_ids[0]
         except Exception as e:
             print(f"পেজ ফেচ এরর: {e}")
 
-    # ২. সাম্প্রতিক পোস্ট ও ক্যাটাগরি এন্ডপয়েন্ট থেকে আইডি খোঁজা (যেখানে ভুল হয়েছিল)
-    api_urls = [
-        "https://bangladesh.serey.io/api/categories",
-        "https://bangladesh.serey.io/api/posts?limit=5",
-        "https://global-api.serey.io/api/v2/categories",
-        "https://global-api.serey.io/api/v2/posts?limit=5",
-    ]
-    for api in api_urls:
-        try:
-            r = session.get(api, timeout=8)
-            print(f"চেক API {api} -> স্ট্যাটাস: {r.status_code}")
-            if r.status_code == 200:
-                ids = re.findall(r'"(?:_id|community|communityId)"\s*:\s*"([a-f0-9]{24})"', r.text)
-                if ids:
-                    print(f"API থেকে কমিউনিটি আইডি পাওয়া গেছে: {ids[0]}")
-                    return ids[0]
-        except Exception as e:
-            print(f"API ফেচ এরর: {e}")
-
-    return None
+    # যদি স্ক্র্যাপ করে না পাওয়া যায় তবে স্ট্যান্ডার্ড ফলব্যাক ব্যবহার
+    print("সতর্কতা: পেজ স্ক্র্যাপ করে আইডি পাওয়া যায়নি, ডিফল্ট 'bangladesh' দিয়ে চেষ্টা করা হচ্ছে...")
+    return "bangladesh"
 
 
 def post_to_serey(token, community_id, title, body, tags=None):
@@ -197,6 +178,13 @@ def main():
         print("ত্রুটি: SEREY_POSTING_KEY (বা পাসওয়ার্ড) GitHub Secrets এ পাওয়া যায়নি!")
         return
 
+    token, login_comm_id = get_serey_auth()
+    if not token:
+        print("সেরিতে লগইন ব্যর্থ হয়েছে। পাসওয়ার্ড বা ইউজারনেম চেক করুন।")
+        return
+
+    comm_id = find_community_id(token, fallback_id=login_comm_id)
+
     data = load_data()
 
     # ২৪ ঘণ্টার মধ্যে কয়টি পোস্ট হয়েছে চেক করা
@@ -204,12 +192,12 @@ def main():
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
     if len(data["timestamps"]) >= MAX_DAILY_POSTS:
-        print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে। পরবর্তী রানে পোস্ট হবে।")
+        print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।")
         return
 
-    # কিউ (Queue) ফাঁকা থাকলে পুরনো পোস্ট খোঁজা
+    # কিউ ফাঁকা থাকলে ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা
     if not data.get("queue"):
-        print("নতুন পুরনো পোস্ট খোঁজা হচ্ছে...")
+        print("ব্লার্ট থেকে ১ বছর আগের পোস্ট খোঁজা হচ্ছে...")
         fetched_permlinks = fetch_one_year_old_posts()
         posted_set = set(data.get("posted", []))
         new_queue = [p for p in fetched_permlinks if p not in posted_set]
@@ -218,16 +206,6 @@ def main():
 
     if not data["queue"]:
         print("পোস্ট করার মতো কোনো পোস্ট পাওয়া যায়নি।")
-        return
-
-    token, login_comm_id = get_serey_auth()
-    if not token:
-        print("সেরিতে লগইন ব্যর্থ হয়েছে। পাসওয়ার্ড বা ইউজারনেম চেক করুন।")
-        return
-
-    comm_id = find_community_id(token, fallback_id=login_comm_id)
-    if not comm_id:
-        print("কমিউনিটি আইডি পাওয়া যায়নি!")
         return
 
     permlink_to_post = data["queue"].pop(0)
@@ -241,7 +219,6 @@ def main():
     title = post_info.get("title", "")
     body = post_info.get("body", "")
 
-    # ট্যাগ বের করা
     tags = []
     try:
         json_meta = json.loads(post_info.get("json_metadata", "{}"))
@@ -255,7 +232,7 @@ def main():
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হচ্ছে...")
     else:
-        # ব্যর্থ হলে পুনরায় কিউতে ফিরিয়ে রাখা
+        # ব্যর্থ হলে পুনরায় কিউতে রাখা
         data["queue"].insert(0, permlink_to_post)
 
     save_data(data)
