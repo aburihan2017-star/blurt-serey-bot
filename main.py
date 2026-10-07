@@ -1,15 +1,16 @@
 import json
 import os
-import re
 import time
 from datetime import datetime, timedelta
 import requests
 
+# কনফিগারেশন
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
 SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
-# যদি কোনো নির্দিষ্ট কমিউনিটি আইডি থাকে তবে এটি ব্যবহার করবে
-CUSTOM_COMMUNITY_ID = os.environ.get("SEREY_COMMUNITY_ID", "").strip()
+
+# সরাসরি বাংলাদেশ কমিউনিটি নির্ধারণ করা হলো
+COMMUNITY_NAME = "bangladesh"
 
 BLURT_NODES = [
     "https://blurt-rpc.saboin.com",
@@ -22,10 +23,10 @@ MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 86400
 
 BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
-    "Referer": "https://bangladesh.serey.io/blog/new",
+    "Referer": "https://bangladesh.serey.io/",
     "Origin": "https://bangladesh.serey.io",
 }
 
@@ -85,87 +86,45 @@ def get_serey_auth():
                 or data.get("accessToken")
                 or (data.get("data", {}).get("token") if isinstance(data.get("data"), dict) else None)
             )
-            print("সেরিতে সফলভাবে লগইন হয়েছে!")
-
-            # লগইন রেসপন্স থেকে কমিউনিটি আইডি খোঁজা
-            comm_found = None
-            m = re.search(r'"(?:community|_community|communityId)"\s*:\s*"([a-f0-9]{24})"', r.text)
-            if m:
-                comm_found = m.group(1)
-            return token, comm_found
+            if token:
+                print("সেরিতে সফলভাবে লগইন হয়েছে!")
+                return token
+            print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
         else:
-            print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
+            print(f"লগইন রেসপন্স এরর: {r.status_code} - {r.text}")
     except Exception as e:
         print(f"লগইন এরর: {e}")
-    return None, None
+    return None
 
 
-def find_community_id(token, fallback_id=None):
-    if CUSTOM_COMMUNITY_ID:
-        print(f"GitHub Secrets / কনফিগ থেকে কমিউনিটি আইডি ব্যবহার করা হচ্ছে: {CUSTOM_COMMUNITY_ID}")
-        return CUSTOM_COMMUNITY_ID
-
-    if fallback_id:
-        print(f"লগইন ডাটা থেকে কমিউনিটি আইডি পাওয়া গেছে: {fallback_id}")
-        return fallback_id
-
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": BASE_HEADERS["User-Agent"],
-        "Authorization": f"Bearer {token}",
-    })
-
-    web_pages = [
-        "https://bangladesh.serey.io/blog/new",
-        "https://bangladesh.serey.io",
-    ]
-    for page in web_pages:
-        try:
-            r = session.get(page, timeout=10)
-            if r.status_code == 200:
-                text = r.text
-
-                # পেজ স্ক্রিপ্ট থেকে সরাসরি যে কোনো ২৪ ক্যারেক্টারের ObjectId খোঁজা
-                ids = re.findall(r'"(?:_id|communityId|community)"\s*:\s*"([a-f0-9]{24})"', text)
-                if ids:
-                    print(f"ওয়েবপেজ থেকে কমিউনিটি আইডি পাওয়া গেছে: {ids[0]}")
-                    return ids[0]
-
-                # যদি ২৪ অক্ষরের কোনো সাধারণ আইডি পাওয়া যায়
-                all_hex_ids = re.findall(r'[a-f0-9]{24}', text)
-                if all_hex_ids:
-                    print(f"পেজ থেকে সম্ভাব্য আইডি পাওয়া গেছে: {all_hex_ids[0]}")
-                    return all_hex_ids[0]
-        except Exception as e:
-            print(f"পেজ ফেচ এরর: {e}")
-
-    # যদি স্ক্র্যাপ করে না পাওয়া যায় তবে স্ট্যান্ডার্ড ফলব্যাক ব্যবহার
-    print("সতর্কতা: পেজ স্ক্র্যাপ করে আইডি পাওয়া যায়নি, ডিফল্ট 'bangladesh' দিয়ে চেষ্টা করা হচ্ছে...")
-    return "bangladesh"
-
-
-def post_to_serey(token, community_id, title, body, tags=None):
+def post_to_serey(token, title, body, tags=None):
     post_url = "https://global-api.serey.io/api/v2/posts"
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
-    if not tags:
-        tags = ["serey-io", "bengali", "blurt"]
+    # বাংলাদেশ কমিউনিটির ট্যাগ নিশ্চিত করা
+    final_tags = ["bangladesh", "serey-io", "bengali"]
+    if tags:
+        for t in tags:
+            clean_t = str(t).strip().lower()
+            if clean_t and clean_t not in final_tags:
+                final_tags.append(clean_t)
 
     payload = {
         "title": title,
         "body": body,
-        "community": community_id,
-        "tags": tags,
+        "community": COMMUNITY_NAME,
+        "category": COMMUNITY_NAME,
+        "tags": final_tags,
     }
 
     try:
-        r = requests.post(post_url, json=payload, headers=headers, timeout=20)
+        r = requests.post(post_url, json=payload, headers=headers, timeout=25)
         if r.status_code in [200, 201]:
-            print(f"পোস্ট সফল হয়েছে: {title}")
+            print(f"✅ পোস্ট সফল হয়েছে: {title}")
             return True
         else:
-            print(f"পোস্ট ব্যর্থ হয়েছে ({r.status_code}): {r.text}")
+            print(f"❌ পোস্ট ব্যর্থ হয়েছে ({r.status_code}): {r.text}")
     except Exception as e:
         print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
 
@@ -175,19 +134,19 @@ def post_to_serey(token, community_id, title, body, tags=None):
 def main():
     print("বট চালু হচ্ছে...")
     if not SEREY_PASSWORD:
-        print("ত্রুটি: SEREY_POSTING_KEY (বা পাসওয়ার্ড) GitHub Secrets এ পাওয়া যায়নি!")
+        print("ত্রুটি: SEREY_POSTING_KEY (বা পাসওয়ার্ড) পাওয়া যায়নি!")
         return
 
-    token, login_comm_id = get_serey_auth()
+    token = get_serey_auth()
     if not token:
-        print("সেরিতে লগইন ব্যর্থ হয়েছে। পাসওয়ার্ড বা ইউজারনেম চেক করুন।")
+        print("সেরিতে লগইন ব্যর্থ হয়েছে। ইউজারনেম ও পাসওয়ার্ড চেক করুন।")
         return
 
-    comm_id = find_community_id(token, fallback_id=login_comm_id)
+    print(f"নির্বাচিত কমিউনিটি: {COMMUNITY_NAME}")
 
     data = load_data()
 
-    # ২৪ ঘণ্টার মধ্যে কয়টি পোস্ট হয়েছে চেক করা
+    # দৈনিক সীমা চেক (সর্বোচ্চ ২টি পোস্ট)
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -195,9 +154,9 @@ def main():
         print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।")
         return
 
-    # কিউ ফাঁকা থাকলে ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা
+    # কিউ খালি থাকলে ১ বছর আগের পোস্ট আনা
     if not data.get("queue"):
-        print("ব্লার্ট থেকে ১ বছর আগের পোস্ট খোঁজা হচ্ছে...")
+        print("ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...")
         fetched_permlinks = fetch_one_year_old_posts()
         posted_set = set(data.get("posted", []))
         new_queue = [p for p in fetched_permlinks if p not in posted_set]
@@ -205,7 +164,7 @@ def main():
         save_data(data)
 
     if not data["queue"]:
-        print("পোস্ট করার মতো কোনো পোস্ট পাওয়া যায়নি।")
+        print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।")
         return
 
     permlink_to_post = data["queue"].pop(0)
@@ -222,17 +181,18 @@ def main():
     tags = []
     try:
         json_meta = json.loads(post_info.get("json_metadata", "{}"))
-        tags = json_meta.get("tags", [])
+        if "tags" in json_meta and isinstance(json_meta["tags"], list):
+            tags = json_meta["tags"]
     except Exception:
         pass
 
-    success = post_to_serey(token, comm_id, title, body, tags)
+    success = post_to_serey(token, title, body, tags)
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
         data.setdefault("timestamps", []).append(current_time)
-        print("ডাটা সেভ করা হচ্ছে...")
+        print("ডাটা সেভ করা হয়েছে।")
     else:
-        # ব্যর্থ হলে পুনরায় কিউতে রাখা
+        # ব্যর্থ হলে পুনরায় কিউতে ফেরত রাখা
         data["queue"].insert(0, permlink_to_post)
 
     save_data(data)
