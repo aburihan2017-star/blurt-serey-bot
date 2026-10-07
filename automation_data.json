@@ -1,6 +1,5 @@
 {
   "queue": [
-    "new-addition-to-my-splinterlands",
     "my-new-addition-to-splinterlands",
     "i-opened-3-glint-packs",
     "my-experience-buying-the-new",
@@ -31,6 +30,10 @@
     "my-new-addition-to-splinterlands-8e97eb52da0e2",
     "my-new-experience-with-today"
   ],
-  "posted": [],
-  "timestamps": []
+  "posted": [
+    "new-addition-to-my-splinterlands"
+  ],
+  "timestamps": [
+    1791397342.3307734
+  ]
 }
