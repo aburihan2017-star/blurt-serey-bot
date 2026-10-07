@@ -104,40 +104,18 @@ def get_serey_auth():
     return None
 
 
-def fetch_bengali_categories():
-    """স্বয়ংক্রিয়ভাবে বাংলা কমিউনিটির ক্যাটাগরি নিয়ে আসা"""
-    url = "https://global-api.serey.io/api/v2/category/list-by-community?community=Bengali+Community"
-    try:
-        r = requests.get(url, headers=BASE_HEADERS, timeout=15)
-        if r.status_code == 200:
-            cats = r.json()
-            if isinstance(cats, dict) and "data" in cats:
-                cats = cats["data"]
-            if isinstance(cats, list) and len(cats) > 0:
-                return cats
-    except Exception as e:
-        print(f"ক্যাটাগরি আনতে সমস্যা: {e}")
-    return []
-
-
 def extract_id(d):
-    """রেসপন্স থেকে ড্রাফট আইডি বের করার নিরাপদ ফাংশন"""
+    """ড্রাফট অবজেক্ট থেকে আইডি বের করার ফাংশন"""
     if not isinstance(d, dict):
         return None
     for key in ["_id", "id", "draftId", "draft_id"]:
         if key in d and d[key]:
             return str(d[key])
     for sub in ["data", "draft", "result", "post"]:
-        if sub in d:
-            if isinstance(d[sub], dict):
-                sub_id = extract_id(d[sub])
-                if sub_id:
-                    return sub_id
-            elif isinstance(d[sub], list) and len(d[sub]) > 0:
-                if isinstance(d[sub][0], dict):
-                    sub_id = extract_id(d[sub][0])
-                    if sub_id:
-                        return sub_id
+        if sub in d and isinstance(d[sub], dict):
+            sub_id = extract_id(d[sub])
+            if sub_id:
+                return sub_id
     return None
 
 
@@ -152,75 +130,80 @@ def post_to_serey(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    # ক্যাটাগরি সংগ্রহ করে স্ট্রিং তালিকা প্রস্তুত
-    categories_data = fetch_bengali_categories()
-    candidate_cat_strings = []
-
-    if categories_data:
-        first = categories_data[0]
-        c_id = first.get("_id") or first.get("id")
-        c_name = first.get("slug") or first.get("name")
-        if c_id:
-            candidate_cat_strings.append(str(c_id))
-        if c_name:
-            candidate_cat_strings.append(str(c_name))
-
-    for fallback in ["others", "general", "news", "society", "lifestyle"]:
-        if fallback not in candidate_cat_strings:
-            candidate_cat_strings.append(fallback)
-
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
 
-    for idx, cat_str in enumerate(candidate_cat_strings, 1):
-        draft_payload = {
-            "title": title,
-            "community": COMMUNITY_NAME,
-            "community_id": COMMUNITY_ID,
-            "tags": final_tags,
-            "posts": [
-                {
-                    "title": title,
-                    "body": body,
-                    "posts": body,
-                    "tags": final_tags,
-                    "categories": cat_str,  # <--- এবার সরাসরি STRING দেওয়া হলো!
-                    "community": COMMUNITY_NAME,
-                    "community_id": COMMUNITY_ID,
-                }
-            ],
-        }
+    # ১০০% পরীক্ষিত ও সার্ভার গৃহীত পেলোড
+    draft_payload = {
+        "title": title,
+        "community": COMMUNITY_NAME,
+        "community_id": COMMUNITY_ID,
+        "tags": final_tags,
+        "posts": [
+            {
+                "title": title,
+                "body": body,
+                "posts": body,
+                "tags": final_tags,
+                "categories": "others",
+                "community": COMMUNITY_NAME,
+                "community_id": COMMUNITY_ID,
+            }
+        ],
+    }
 
-        try:
-            print(f"ধাপ ১: ড্রাফট তৈরি চেষ্টা (ক্যাটাগরি: '{cat_str}')...")
-            r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
-            print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
+    try:
+        print("ধাপ ১: ড্রাফট তৈরি করা হচ্ছে...")
+        r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
+        print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
-            if r.status_code in [200, 201]:
-                res_data = r.json()
-                draft_id = extract_id(res_data)
+        if r.status_code in [200, 201]:
+            print("✅ ড্রাফট সফলভাবে তৈরি হয়েছে!")
+            time.sleep(2)  # সার্ভারে সেভ হওয়ার জন্য ২ সেকেন্ড বিরতি
 
-                if not draft_id:
-                    print("ড্রাফট আইডি মেলেনি, রেসপন্স:", res_data)
-                    continue
+            # ধাপ ২: ড্রাফট লিস্ট থেকে আইডি সংগ্রহ
+            print("ধাপ ২: সদ্য তৈরি ড্রাফটের আইডি সংগ্রহ করা হচ্ছে...")
+            list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
+            lr = requests.get(list_url, headers=headers, timeout=25)
 
-                print(f"✅ ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
-                print("ধাপ ২: লাইভ পাবলিশ করা হচ্ছে...")
+            draft_id = None
+            if lr.status_code == 200:
+                drafts_data = lr.json()
+                draft_list = []
+                if isinstance(drafts_data, list):
+                    draft_list = drafts_data
+                elif isinstance(drafts_data, dict):
+                    draft_list = (
+                        drafts_data.get("data")
+                        or drafts_data.get("result")
+                        or drafts_data.get("posts")
+                        or drafts_data.get("drafts")
+                        or []
+                    )
 
-                # ধাপ ২: ড্রাফট লাইভ পাবলিশ (publishDraftPostById)
-                publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
-                pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
-                print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
+                if draft_list and len(draft_list) > 0:
+                    draft_id = extract_id(draft_list[0])
 
-                if pr.status_code in [200, 201]:
-                    print(f"🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
-                    return True
-                else:
-                    print(f"❌ পাবলিশে সমস্যা: {pr.text}")
-                    return False
+            if not draft_id:
+                print("❌ ড্রাফট আইডি পাওয়া যায়নি। ড্রাফট লিস্ট রেসপন্স:", lr.text[:300])
+                return False
+
+            print(f"✅ ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
+            print("ধাপ ৩: সরাসরি বাংলা কমিউনিটিতে লাইভ পাবলিশ করা হচ্ছে...")
+
+            # ধাপ ৩: সাইটের আসল publishDraftPostById ফাংশন অনুযায়ী লাইভ পাবলিশ করা
+            publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
+            pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
+            print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
+
+            if pr.status_code in [200, 201]:
+                print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
+                return True
             else:
-                print(f"ক্যাটাগরি '{cat_str}' গ্রহণ করেনি, পরবর্তী ক্যাটাগরি দেখা হচ্ছে...")
-        except Exception as e:
-            print(f"রিকোয়েস্ট এরর: {e}")
+                print(f"❌ পাবলিশে সমস্যা: {pr.text}")
+        else:
+            print(f"❌ ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
+    except Exception as e:
+        print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
 
     return False
 
