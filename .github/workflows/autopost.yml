@@ -6,12 +6,18 @@ on:
     - cron: '0 4,16 * * *'
   workflow_dispatch:
 
+# গিটহাবে পুশ করার পারমিশন নিশ্চিত করা হলো
+permissions:
+  contents: write
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -19,7 +25,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests beem
+        run: pip install requests
 
       - name: Run Auto Poster
         env:
@@ -32,5 +38,6 @@ jobs:
           git config --global user.name "AutoBot"
           git config --global user.email "bot@github.com"
           git add automation_data.json || true
-          git commit -m "Update post queue and history" || true
-          git push || true
+          git commit -m "Update post queue and history [skip ci]" || exit 0
+          git pull --rebase origin main
+          git push origin main
