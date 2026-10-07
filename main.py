@@ -9,7 +9,6 @@ BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
 SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
 
-# সরাসরি বাংলাদেশ কমিউনিটি নির্ধারণ করা হলো
 COMMUNITY_NAME = "bangladesh"
 
 BLURT_NODES = [
@@ -35,7 +34,7 @@ def blurt_call(method, params):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
     for node in BLURT_NODES:
         try:
-            res = requests.post(node, json=payload, timeout=10).json()
+            res = requests.post(node, json=payload, timeout=15).json()
             if "result" in res:
                 return res["result"]
         except Exception:
@@ -77,23 +76,31 @@ def get_post_details(permlink):
 def get_serey_auth():
     login_url = "https://global-api.serey.io/api/v2/auth/login"
     payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
-    try:
-        r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=15)
-        if r.status_code in [200, 201]:
-            data = r.json()
-            token = (
-                data.get("token")
-                or data.get("accessToken")
-                or (data.get("data", {}).get("token") if isinstance(data.get("data"), dict) else None)
-            )
-            if token:
-                print("সেরিতে সফলভাবে লগইন হয়েছে!")
-                return token
-            print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
-        else:
-            print(f"লগইন রেসপন্স এরর: {r.status_code} - {r.text}")
-    except Exception as e:
-        print(f"লগইন এরর: {e}")
+
+    # ৩ বার রিট্রাই করবে যদি সার্ভার স্লো থাকে
+    for attempt in range(1, 4):
+        try:
+            print(f"সেরিতে লগইন চেষ্টা চলছে (Attempt {attempt}/3)...")
+            r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=40)
+            if r.status_code in [200, 201]:
+                data = r.json()
+                token = (
+                    data.get("token")
+                    or data.get("accessToken")
+                    or (data.get("data", {}).get("token") if isinstance(data.get("data"), dict) else None)
+                )
+                if token:
+                    print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
+                    return token
+                print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
+            else:
+                print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
+        except requests.exceptions.Timeout:
+            print(f"⚠️ সার্ভার টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড পর আবার চেষ্টা করা হচ্ছে...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"লগইন এরর: {e}")
+            time.sleep(3)
     return None
 
 
@@ -102,7 +109,6 @@ def post_to_serey(token, title, body, tags=None):
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
-    # বাংলাদেশ কমিউনিটির ট্যাগ নিশ্চিত করা
     final_tags = ["bangladesh", "serey-io", "bengali"]
     if tags:
         for t in tags:
@@ -118,15 +124,22 @@ def post_to_serey(token, title, body, tags=None):
         "tags": final_tags,
     }
 
-    try:
-        r = requests.post(post_url, json=payload, headers=headers, timeout=25)
-        if r.status_code in [200, 201]:
-            print(f"✅ পোস্ট সফল হয়েছে: {title}")
-            return True
-        else:
-            print(f"❌ পোস্ট ব্যর্থ হয়েছে ({r.status_code}): {r.text}")
-    except Exception as e:
-        print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
+    for attempt in range(1, 4):
+        try:
+            print(f"পোস্ট সাবমিট করা হচ্ছে (Attempt {attempt}/3)...")
+            r = requests.post(post_url, json=payload, headers=headers, timeout=45)
+            if r.status_code in [200, 201]:
+                print(f"✅ পোস্ট সফল হয়েছে: {title}")
+                return True
+            else:
+                print(f"❌ পোস্ট ব্যর্থ হয়েছে ({r.status_code}): {r.text}")
+                break
+        except requests.exceptions.Timeout:
+            print(f"পোস্ট টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড অপেক্ষা করা হচ্ছে...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
+            break
 
     return False
 
@@ -139,7 +152,7 @@ def main():
 
     token = get_serey_auth()
     if not token:
-        print("সেরিতে লগইন ব্যর্থ হয়েছে। ইউজারনেম ও পাসওয়ার্ড চেক করুন।")
+        print("সেরিতে লগইন ব্যর্থ হয়েছে। ইউজারনেম ও পাসওয়ার্ড সঠিক কিনা চেক করুন।")
         return
 
     print(f"নির্বাচিত কমিউনিটি: {COMMUNITY_NAME}")
@@ -154,7 +167,6 @@ def main():
         print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।")
         return
 
-    # কিউ খালি থাকলে ১ বছর আগের পোস্ট আনা
     if not data.get("queue"):
         print("ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...")
         fetched_permlinks = fetch_one_year_old_posts()
@@ -192,7 +204,6 @@ def main():
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
-        # ব্যর্থ হলে পুনরায় কিউতে ফেরত রাখা
         data["queue"].insert(0, permlink_to_post)
 
     save_data(data)
