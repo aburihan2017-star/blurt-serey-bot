@@ -105,13 +105,23 @@ def get_serey_auth():
     return None
 
 
-def extract_id(d):
-    if not isinstance(d, dict):
-        return None
-    for key in ["id", "_id", "draftId", "draft_id"]:
-        if key in d and d[key] is not None:
-            return str(d[key])
-    return None
+def clear_stuck_drafts(headers):
+    """আটকে থাকা পুরনো ড্রাফটগুলো (যেমন ID 66) সম্পূর্ণ ডিলিট করা"""
+    list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
+    try:
+        lr = requests.get(list_url, headers=headers, timeout=20)
+        if lr.status_code == 200:
+            draft_list = lr.json().get("draft_posts", [])
+            if draft_list:
+                print(f"🧹 আটকে থাকা পুরনো {len(draft_list)}টি ড্রাফট মুছে ফেলা হচ্ছে...")
+                for d in draft_list:
+                    d_id = d.get("id") or d.get("_id")
+                    if d_id:
+                        del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
+                        requests.delete(del_url, headers=headers, timeout=15)
+                time.sleep(2)
+    except Exception as e:
+        print("ক্লিনআপ সতর্কতা:", e)
 
 
 def post_to_serey(token, title, body, tags=None):
@@ -125,6 +135,9 @@ def post_to_serey(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
+    # ধাপ ০: আটকে থাকা পুরনো ড্রাফট (যেমন ৬৬) পরিষ্কার করা
+    clear_stuck_drafts(headers)
+
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
     draft_payload = {
         "title": title,
@@ -137,7 +150,7 @@ def post_to_serey(token, title, body, tags=None):
                 "body": body,
                 "posts": body,
                 "tags": final_tags,
-                "categories": "news",  # ব্রাউজারের টেস্টে সফল প্রমাণিত ক্যাটাগরি
+                "categories": "news",
                 "community": COMMUNITY_NAME,
                 "community_id": COMMUNITY_ID,
             }
@@ -150,9 +163,10 @@ def post_to_serey(token, title, body, tags=None):
         print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
         if r.status_code in [200, 201]:
-            print("✅ ড্রাফট সফলভাবে তৈরি হয়েছে!")
+            print("✅ ফ্রেশ ড্রাফট সফলভাবে তৈরি হয়েছে!")
             time.sleep(3)
 
+            # ধাপ ২: সদ্য তৈরি নতুন ড্রাফট আইডি বাছাই
             print("ধাপ ২: সদ্য তৈরি ড্রাফটের আইডি সংগ্রহ করা হচ্ছে...")
             list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
             lr = requests.get(list_url, headers=headers, timeout=25)
@@ -160,25 +174,19 @@ def post_to_serey(token, title, body, tags=None):
             draft_id = None
             if lr.status_code == 200:
                 drafts_data = lr.json()
-                draft_list = []
-                if isinstance(drafts_data, dict):
-                    draft_list = (
-                        drafts_data.get("draft_posts")
-                        or drafts_data.get("data")
-                        or drafts_data.get("result")
-                        or []
-                    )
-                elif isinstance(drafts_data, list):
-                    draft_list = drafts_data
+                draft_list = drafts_data.get("draft_posts") or drafts_data.get("data") or []
 
-                if draft_list and len(draft_list) > 0:
-                    draft_id = extract_id(draft_list[0])
+                if draft_list:
+                    # আইডি দিয়ে সাজিয়ে একদম সর্বশেষ নতুন আইডি নেওয়া
+                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0) or x.get("_id", 0)), reverse=True)
+                    newest = sorted_drafts[0]
+                    draft_id = str(newest.get("id") or newest.get("_id"))
 
             if not draft_id:
                 print("❌ ড্রাফট আইডি মেলেনি।")
                 return False
 
-            print(f"✅ ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
+            print(f"✅ নতুন ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
             print("ধাপ ৩: সরাসরি বাংলা কমিউনিটিতে লাইভ পাবলিশ করা হচ্ছে...")
 
             publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
@@ -225,7 +233,6 @@ def main():
 
     data = load_data()
 
-    # দৈনিক সীমা চেক (সর্বোচ্চ ২টি পোস্ট)
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -273,7 +280,7 @@ def main():
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
-        # কোনো কারণে একটি পোস্ট ব্যর্থ হলে সেটিকে কিউয়ের শেষে পাঠানো হলো (যাতে অন্য পোস্ট আটকে না থাকে)
+        # ব্যর্থ হলে এটিকে কিউয়ের শেষে রাখা হলো
         data["queue"].append(permlink_to_post)
 
     save_data(data)
