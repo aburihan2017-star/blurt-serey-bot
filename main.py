@@ -127,7 +127,6 @@ def post_to_serey(token, title, body, tags=None):
 
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
 
-    # ১০০% পরীক্ষিত ড্রাফট ডাটা
     draft_payload = {
         "title": title,
         "community": COMMUNITY_NAME,
@@ -153,9 +152,9 @@ def post_to_serey(token, title, body, tags=None):
 
         if r.status_code in [200, 201]:
             print("✅ ড্রাফট সফলভাবে তৈরি হয়েছে!")
-            time.sleep(2)  # ডাটাবেজে রেকর্ড নিশ্চিত করতে ২ সেকেন্ড অপেক্ষা
+            time.sleep(3)
 
-            # ধাপ ২: 'draft_posts' থেকে ড্রাফট আইডি নেওয়া
+            # ধাপ ২: ড্রাফট আইডি সংগ্রহ
             print("ধাপ ২: সদ্য তৈরি ড্রাফটের আইডি সংগ্রহ করা হচ্ছে...")
             list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
             lr = requests.get(list_url, headers=headers, timeout=25)
@@ -166,7 +165,7 @@ def post_to_serey(token, title, body, tags=None):
                 draft_list = []
                 if isinstance(drafts_data, dict):
                     draft_list = (
-                        drafts_data.get("draft_posts")  # <--- আসল ফিল্ড draft_posts!
+                        drafts_data.get("draft_posts")
                         or drafts_data.get("data")
                         or drafts_data.get("result")
                         or drafts_data.get("drafts")
@@ -185,16 +184,29 @@ def post_to_serey(token, title, body, tags=None):
             print(f"✅ ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
             print("ধাপ ৩: সরাসরি বাংলা কমিউনিটিতে লাইভ পাবলিশ করা হচ্ছে...")
 
-            # ধাপ ৩: ড্রাফটটি লাইভ পাবলিশ করা
+            # ধাপ ৩: রিট্রাই লুপসহ লাইভ পাবলিশ করা
             publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
-            pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
-            print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
 
-            if pr.status_code in [200, 201]:
-                print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
-                return True
-            else:
-                print(f"❌ পাবলিশে সমস্যা: {pr.text}")
+            for pub_attempt in range(1, 6):
+                pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
+                print(f"পাবলিশ রেসপন্স ({pr.status_code}) [Attempt {pub_attempt}/5]: {pr.text}")
+
+                if pr.status_code in [200, 201]:
+                    print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
+                    return True
+
+                # যদি ব্যাকএন্ড ব্লকচেইন লক বা ইন-প্রোগ্রেস থাকে, অপেক্ষা করে আবার চেষ্টা করা
+                err_msg = pr.text.lower()
+                if "inprogress" in err_msg or "in progress" in err_msg:
+                    print("⚠️ সার্ভার প্রসেসিংয়ে ব্যস্ত আছে। ১০ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করা হচ্ছে...")
+                    time.sleep(10)
+                elif "already" in err_msg and "publish" in err_msg:
+                    print(f"🎉 পোস্টটি অলরেডি পাবলিশ হয়ে গেছে: {title}")
+                    return True
+                else:
+                    time.sleep(5)
+
+            print("❌ একাধিক চেষ্টার পরেও পাবলিশ সম্পন্ন করা যায়নি।")
         else:
             print(f"❌ ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
     except Exception as e:
