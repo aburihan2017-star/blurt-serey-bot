@@ -114,6 +114,25 @@ def extract_id(d):
     return None
 
 
+def clear_stuck_drafts(headers):
+    """আটকে থাকা পুরনো ড্রাফটগুলো স্বয়ংক্রিয়ভাবে মুছে ফেলা"""
+    list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
+    try:
+        lr = requests.get(list_url, headers=headers, timeout=20)
+        if lr.status_code == 200:
+            draft_list = lr.json().get("draft_posts", [])
+            if draft_list:
+                print(f"🧹 পুরনো/আটকে থাকা {len(draft_list)}টি ড্রাফট পরিষ্কার করা হচ্ছে...")
+                for d in draft_list:
+                    d_id = d.get("id") or d.get("_id")
+                    if d_id:
+                        del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
+                        requests.delete(del_url, headers=headers, timeout=15)
+                time.sleep(2)
+    except Exception as e:
+        print("ক্লিনআপ সতর্কতা:", e)
+
+
 def post_to_serey(token, title, body, tags=None):
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
@@ -124,6 +143,9 @@ def post_to_serey(token, title, body, tags=None):
             clean_t = str(t).strip().lower()
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
+
+    # ধাপ ০: আটকে থাকা ড্রাফট (যেমন: ID 25) ডিলিট করে অ্যাকাউন্ট পরিষ্কার করা
+    clear_stuck_drafts(headers)
 
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
 
@@ -146,15 +168,15 @@ def post_to_serey(token, title, body, tags=None):
     }
 
     try:
-        print("ধাপ ১: ড্রাফট তৈরি করা হচ্ছে...")
+        print("ধাপ ১: নতুন ড্রাফট তৈরি করা হচ্ছে...")
         r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
         print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
         if r.status_code in [200, 201]:
-            print("✅ ড্রাফট সফলভাবে তৈরি হয়েছে!")
+            print("✅ ফ্রেশ ড্রাফট সফলভাবে তৈরি হয়েছে!")
             time.sleep(3)
 
-            # ধাপ ২: ড্রাফট আইডি সংগ্রহ
+            # ধাপ ২: ফ্রেশ ড্রাফট আইডি সংগ্রহ
             print("ধাপ ২: সদ্য তৈরি ড্রাফটের আইডি সংগ্রহ করা হচ্ছে...")
             list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
             lr = requests.get(list_url, headers=headers, timeout=25)
@@ -181,10 +203,10 @@ def post_to_serey(token, title, body, tags=None):
                 print("❌ ড্রাফট আইডি পাওয়া যায়নি। রেসপন্স:", lr.text[:300])
                 return False
 
-            print(f"✅ ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
+            print(f"✅ নতুন ড্রাফট আইডি পাওয়া গেছে: {draft_id}")
             print("ধাপ ৩: সরাসরি বাংলা কমিউনিটিতে লাইভ পাবলিশ করা হচ্ছে...")
 
-            # ধাপ ৩: রিট্রাই লুপসহ লাইভ পাবলিশ করা
+            # ধাপ ৩: ফ্রেশ ড্রাফট লাইভ পাবলিশ
             publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
 
             for pub_attempt in range(1, 6):
@@ -195,7 +217,6 @@ def post_to_serey(token, title, body, tags=None):
                     print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
                     return True
 
-                # যদি ব্যাকএন্ড ব্লকচেইন লক বা ইন-প্রোগ্রেস থাকে, অপেক্ষা করে আবার চেষ্টা করা
                 err_msg = pr.text.lower()
                 if "inprogress" in err_msg or "in progress" in err_msg:
                     print("⚠️ সার্ভার প্রসেসিংয়ে ব্যস্ত আছে। ১০ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করা হচ্ছে...")
@@ -206,7 +227,7 @@ def post_to_serey(token, title, body, tags=None):
                 else:
                     time.sleep(5)
 
-            print("❌ একাধিক চেষ্টার পরেও পাবলিশ সম্পন্ন করা যায়নি।")
+            print("❌ পাবলিশ সম্পন্ন করা যায়নি।")
         else:
             print(f"❌ ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
     except Exception as e:
