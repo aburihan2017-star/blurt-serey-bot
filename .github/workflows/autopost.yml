@@ -6,7 +6,6 @@ on:
     - cron: '0 4,16 * * *'
   workflow_dispatch:
 
-# গিটহাবে পুশ করার পারমিশন নিশ্চিত করা হলো
 permissions:
   contents: write
 
@@ -25,7 +24,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests beem
+        run: pip install requests
 
       - name: Run Auto Poster
         env:
