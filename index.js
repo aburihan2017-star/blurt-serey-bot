@@ -11,7 +11,7 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি ব্লকচেইন কনফিগারেশন (আপনার ব্রাউজার থেকে সরাসরি প্রাপ্ত)
+// সেরি ব্লকচেইন কনফিগারেশন
 steem.api.setOptions({ url: 'https://api.serey.io' });
 steem.config.set('address_prefix', 'SRY');
 steem.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
@@ -70,9 +70,9 @@ async function getPostDetails(permlink) {
 function postToSereyBlockchain(title, body, permlink, tags) {
   return new Promise((resolve) => {
     const parentAuthor = '';
-    const parentPermlink = 'bengali-community'; // সেরি বাংলা কমিউনিটি
-    const finalTags = ['news', 'bengali-community', 'others'];
+    const parentPermlink = 'bengali-community'; // মূল ক্যাটাগরি
 
+    const finalTags = ['news', 'bengali-community', 'others'];
     if (tags && Array.isArray(tags)) {
       tags.forEach(t => {
         const clean = String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '');
@@ -80,8 +80,12 @@ function postToSereyBlockchain(title, body, permlink, tags) {
       });
     }
 
+    // বাংলা কমিউনিটি ওয়েবসাইটে প্রদর্শনের জন্য পূর্ণাঙ্গ মেটাডাটা
     const jsonMetadata = JSON.stringify({
       tags: finalTags,
+      community: 'Bengali Community',
+      community_id: 2,
+      categories: ['news', 'others'],
       app: 'serey/0.1',
       format: 'markdown',
     });
@@ -102,7 +106,7 @@ function postToSereyBlockchain(title, body, permlink, tags) {
           console.error(`❌ পোস্ট ব্রডকাস্ট এরর:`, err.message || err);
           resolve(false);
         } else {
-          console.log(`🎉🎉 পোস্ট সরাসরি সেরি ব্লকচেইনে লাইভ হয়েছে! TxID:`, result?.id || 'Success');
+          console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে! TxID:`, result?.id || 'Success');
           resolve(true);
         }
       }
