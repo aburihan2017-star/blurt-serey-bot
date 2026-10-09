@@ -1,34 +1,7 @@
-// ১. WebSocket লেভেলে { } কে [ ] বানানোর গ্লোবাল ইন্টারসেপ্টর (C++ Assert Fix)
-const WebSocket = require('ws');
-const origSend = WebSocket.prototype.send;
-WebSocket.prototype.send = function (data, ...args) {
-  if (typeof data === 'string') {
-    try {
-      const parsed = JSON.parse(data);
-      if (
-        parsed.method === 'call' &&
-        Array.isArray(parsed.params) &&
-        parsed.params.length >= 3 &&
-        typeof parsed.params[2] === 'object' &&
-        !Array.isArray(parsed.params[2]) &&
-        Object.keys(parsed.params[2]).length === 0
-      ) {
-        parsed.params[2] = [];
-        data = JSON.stringify(parsed);
-      }
-    } catch (e) {
-      data = data.replace(
-        '["database_api","get_dynamic_global_properties",{}]',
-        '["database_api","get_dynamic_global_properties",[]]'
-      );
-    }
-  }
-  return origSend.call(this, data, ...args);
-};
-
 const fs = require('fs');
 const axios = require('axios');
-const serey = require('sereyjs');
+const WebSocket = require('ws');
+const steem = require('steem');
 
 // কনফিগারেশন
 const BLURT_USER = 'aburihan1';
@@ -39,10 +12,12 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি অফিসিয়াল নেটওয়ার্ক কনফিগারেশন
-serey.api.setOptions({ url: 'wss://api.serey.io' });
-serey.config.set('address_prefix', 'SRY');
-serey.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
+const SEREY_CHAIN_ID = '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324';
+const SEREY_PREFIX = 'SRY';
+
+// Steem লাইব্রেরিতে সেরি চেইন কনফিগ সেট
+steem.config.set('address_prefix', SEREY_PREFIX);
+steem.config.set('chain_id', SEREY_CHAIN_ID);
 
 const BLURT_NODES = [
   'https://blurt-rpc.saboin.com',
@@ -101,60 +76,137 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-function broadcastToSerey(title, body, permlink, tags) {
-  return new Promise((resolve) => {
-    const parentAuthor = '';
-    const parentPermlink = 'news';
+// সেরি নোডে সরাসরি নিরাপদ WebSocket RPC কল (C++ এরে নিশ্চিত করে)
+function sendSereyRpc(ws, api, method, params = []) {
+  return new Promise((resolve, reject) => {
+    const id = Math.floor(Math.random() * 100000);
+    const req = {
+      id: id,
+      method: 'call',
+      params: [api, method, params],
+    };
 
-    const finalTags = ['news', 'others', 'bengali-community'];
-    if (tags && Array.isArray(tags)) {
-      tags.forEach(t => {
-        const clean = String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '');
-        if (clean && !finalTags.includes(clean)) finalTags.push(clean);
-      });
-    }
+    const handler = (data) => {
+      try {
+        const res = JSON.parse(data.toString());
+        if (res.id === id) {
+          ws.off('message', handler);
+          if (res.error) {
+            reject(new Error(JSON.stringify(res.error)));
+          } else {
+            resolve(res.result);
+          }
+        }
+      } catch (err) {}
+    };
 
-    let formattedBody = body;
-    if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
-      formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
-    }
+    ws.on('message', handler);
+    ws.send(JSON.stringify(req));
 
-    const jsonMetadata = JSON.stringify({
-      tags: finalTags,
-      categories: ['news', 'others'],
-      community_id: 2,
-      community_title: 'Bengali Community',
-      type: 1,
-      post_to_blockchain: true,
-      app: 'serey/0.1',
-      format: 'html',
+    setTimeout(() => {
+      ws.off('message', handler);
+      reject(new Error('RPC Timeout: ' + method));
+    }, 15000);
+  });
+}
+
+// সেরি ব্লকচেইনে সরাসরি সাইন ও ব্রডকাস্ট ফাংশন
+function postToSereyNative(title, body, permlink, tags) {
+  return new Promise(async (resolve) => {
+    const ws = new WebSocket('wss://api.serey.io');
+
+    ws.on('error', (err) => {
+      console.error('❌ WebSocket সংযোগ এরর:', err.message);
+      resolve(false);
     });
 
-    console.log(`🚀 সেরি ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
-    console.log(`📌 পারমালিঙ্ক: ${permlink}`);
+    ws.on('open', async () => {
+      try {
+        console.log('📡 সেরি ব্লকচেইন নোডের সাথে সরাসরি সংযোগ স্থাপিত হয়েছে!');
 
-    serey.broadcast.comment(
-      SEREY_POSTING_KEY,
-      parentAuthor,
-      parentPermlink,
-      SEREY_USER,
-      permlink,
-      title,
-      formattedBody,
-      jsonMetadata,
-      async (err, result) => {
-        if (err) {
-          console.error(`❌ ব্রডকাস্ট এরর:`, err.message || err);
-          resolve(false);
-        } else {
-          console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে! TxID:`, result?.id || 'Success');
-          try {
-            await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
-          } catch (e) {}
-          resolve(true);
+        // ১. সঠিক অ্যারে [] দিয়ে ডাইনামিক প্রপার্টিজ আনা (C++ Assert Fix)
+        const dgp = await sendSereyRpc(ws, 'database_api', 'get_dynamic_global_properties', []);
+        
+        const headBlockNumber = dgp.head_block_number;
+        const headBlockId = dgp.head_block_id;
+        const refBlockNum = (headBlockNumber - 1) & 0xffff;
+        const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
+
+        // টাইমস্ট্যাম্প ও মেয়াদ (Expiration)
+        const blockTime = new Date(dgp.time + 'Z').getTime();
+        const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
+
+        // ট্যাগ ও মেটাডাটা
+        const finalTags = ['news', 'others', 'bengali-community'];
+        if (tags && Array.isArray(tags)) {
+          tags.forEach(t => {
+            const clean = String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '');
+            if (clean && !finalTags.includes(clean)) finalTags.push(clean);
+          });
         }
+
+        let formattedBody = body;
+        if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
+          formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+        }
+
+        const jsonMetadata = JSON.stringify({
+          tags: finalTags,
+          categories: ['news', 'others'],
+          community_id: 2,
+          community_title: 'Bengali Community',
+          type: 1,
+          post_to_blockchain: true,
+          app: 'serey/0.1',
+          format: 'html',
+        });
+
+        // ২. কমেন্ট অপারেশন তৈরি
+        const op = [
+          'comment',
+          {
+            parent_author: '',
+            parent_permlink: 'news',
+            author: SEREY_USER,
+            permlink: permlink,
+            title: title,
+            body: formattedBody,
+            json_metadata: jsonMetadata,
+          },
+        ];
+
+        const tx = {
+          ref_block_num: refBlockNum,
+          ref_block_prefix: refBlockPrefix,
+          expiration: expiration,
+          operations: [op],
+          extensions: [],
+        };
+
+        // ৩. পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা
+        console.log(`🔑 ট্রানজাকশন সাইন করা হচ্ছে...`);
+        const signedTx = steem.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
+
+        console.log(`🚀 ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
+        
+        // ৪. সরাসরি নোডে ব্রডকাস্ট পাঠানো
+        await sendSereyRpc(ws, 'network_broadcast_api', 'broadcast_transaction', [signedTx]);
+
+        console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে!`);
+        
+        // সেরি ওয়েবসাইট ক্যাশ রিফ্রেশ
+        try {
+          await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
+        } catch (e) {}
+
+        ws.close();
+        resolve(true);
+      } catch (err) {
+        console.error('❌ ব্রডকাস্ট এরর:', err.message);
+        ws.close();
+        resolve(false);
       }
-    );
+    });
   });
 }
 
@@ -212,7 +264,7 @@ async function main() {
   const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
 
   console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
-  const success = await broadcastToSerey(title, body, sereyPermlink, tags);
+  const success = await postToSereyNative(title, body, sereyPermlink, tags);
 
   if (success) {
     data.posted = data.posted || [];
