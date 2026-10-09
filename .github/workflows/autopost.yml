@@ -18,19 +18,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          node-version: '18'
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: npm install steem axios
+        run: pip install requests
 
       - name: Run Auto Poster
         env:
           SEREY_POSTING_KEY: ${{ secrets.SEREY_POSTING_KEY }}
           SEREY_USERNAME: raihan123
-        run: node index.js
+        run: python main.py
 
       - name: Save Queue and Log State
         run: |
