@@ -11,8 +11,8 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি ক্লাসিক ব্লকচেইন কনফিগারেশন (useAppbaseApi: false বাধ্যতামূলক)
-serey.api.setOptions({ url: 'https://api.serey.io', useAppbaseApi: false });
+// সেরি অফিসিয়াল WebSocket সংযোগ (ক্লাউডফ্লেয়ার 502 বাইপাস করতে)
+serey.api.setOptions({ url: 'wss://api.serey.io', useAppbaseApi: false });
 serey.config.set('address_prefix', 'SRY');
 serey.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
 
@@ -91,6 +91,7 @@ function broadcastToSerey(title, body, permlink, tags) {
       formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
     }
 
+    // স্ক্রিনশট ৩:২০ থেকে প্রাপ্ত সেরি ডাটাবেজ মডেল
     const jsonMetadata = JSON.stringify({
       tags: finalTags,
       categories: ['news', 'others'],
