@@ -11,10 +11,26 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি অফিসিয়াল WebSocket সংযোগ (ক্লাউডফ্লেয়ার 502 বাইপাস করতে)
+// সেরি অফিসিয়াল WebSocket সংযোগ
 serey.api.setOptions({ url: 'wss://api.serey.io', useAppbaseApi: false });
 serey.config.set('address_prefix', 'SRY');
 serey.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
+
+// sereyjs লাইব্রেরির {} প্যারামিটার বাগ ফিক্স (C++ Assert Exception সমাধান)
+const origCall = serey.api.call.bind(serey.api);
+serey.api.call = function (method, params, callback) {
+  if (typeof params === 'function') {
+    callback = params;
+    params = [];
+  } else if (!params || !Array.isArray(params)) {
+    params = [];
+  }
+  return origCall(method, params, callback);
+};
+
+serey.api.getDynamicGlobalProperties = function (callback) {
+  return serey.api.call('get_dynamic_global_properties', [], callback);
+};
 
 const BLURT_NODES = [
   'https://blurt-rpc.saboin.com',
@@ -91,7 +107,6 @@ function broadcastToSerey(title, body, permlink, tags) {
       formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
     }
 
-    // স্ক্রিনশট ৩:২০ থেকে প্রাপ্ত সেরি ডাটাবেজ মডেল
     const jsonMetadata = JSON.stringify({
       tags: finalTags,
       categories: ['news', 'others'],
