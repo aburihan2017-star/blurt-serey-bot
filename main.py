@@ -20,7 +20,7 @@ BLURT_NODES = [
 ]
 
 DATA_FILE = "automation_data.json"
-MAX_DAILY_POSTS = 2
+MAX_DAILY_POSTS = 1
 DAY_IN_SECONDS = 86400
 
 BASE_HEADERS = {
@@ -99,72 +99,108 @@ def get_serey_auth():
                 if token:
                     print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
                     return token
-                print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
             else:
                 print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
         except requests.exceptions.Timeout:
-            print(f"টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড পর আবার চেষ্টা...")
             time.sleep(5)
         except Exception as e:
-            print(f"লগইন এরর: {e}")
             time.sleep(3)
     return None
 
 
-def post_to_serey_direct(token, title, body, tags=None):
-    """ড্রাফট বাদে সরাসরি আসল পোস্ট API দিয়ে পাবলিশ করা"""
+def clear_stuck_drafts(headers):
+    list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
+    try:
+        lr = requests.get(list_url, headers=headers, timeout=20)
+        if lr.status_code == 200:
+            draft_list = lr.json().get("draft_posts", [])
+            if draft_list:
+                for d in draft_list:
+                    d_id = d.get("id") or d.get("_id")
+                    if d_id:
+                        del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
+                        requests.delete(del_url, headers=headers, timeout=15)
+                time.sleep(2)
+    except Exception:
+        pass
+
+
+def post_to_serey_verified(token, title, body, tags=None):
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
-    final_tags = ["news", "others", "bengali-community"]
+    final_tags = ["news", "bengali-community", "others"]
     if tags:
         for t in tags:
             clean_t = re.sub(r'[^a-z0-9\-]', '', str(t).lower().strip())
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    # HTML ফরম্যাটিং
+    clear_stuck_drafts(headers)
+
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
 
-    # ইউনিক পারমালিঙ্ক
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:35]
     unique_permlink = f"{slug}-{int(time.time())}"
 
-    # স্ক্রিনশট ৩:২০ থেকে সরাসরি প্রাপ্ত আসল পাবলিশ পেলোড
-    direct_payload = {
+    draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
+    draft_payload = {
         "title": title,
-        "permlink": unique_permlink,
-        "description": formatted_body,
-        "body": formatted_body,
-        "categories": ["news", "others"],
+        "community": COMMUNITY_NAME,
         "community_id": COMMUNITY_ID,
-        "community_title": COMMUNITY_NAME,
         "tags": final_tags,
-        "type": 1,
-        "post_to_blockchain": True,
+        "posts": [
+            {
+                "title": title,
+                "body": formatted_body,
+                "posts": formatted_body,
+                "permlink": unique_permlink,
+                "tags": final_tags,
+                "categories": "news",
+                "community": COMMUNITY_NAME,
+                "community_id": COMMUNITY_ID,
+            }
+        ],
     }
 
-    # সেরি ব্যাকএন্ডের মূল পোস্ট এন্ডপয়েন্টগুলো
-    candidate_urls = [
-        "https://global-api.serey.io/api/v2/posts",
-        "https://global-api.serey.io/api/v2/post",
-        "https://global-api.serey.io/api/v2/blog/post",
-        "https://global-api.serey.io/api/v2/articles",
-    ]
+    try:
+        print("ধাপ ১: নতুন ড্রাফট তৈরি করা হচ্ছে...")
+        r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
+        print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
-    for url in candidate_urls:
-        try:
-            print(f"🚀 সরাসরি পোস্ট পাঠানো হচ্ছে: {url}")
-            r = requests.post(url, json=direct_payload, headers=headers, timeout=30)
-            print(f"সার্ভার রেসপন্স ({r.status_code}): {r.text[:300]}")
+        if r.status_code in [200, 201]:
+            print("✅ ড্রাফট সফলভাবে তৈরি হয়েছে!")
+            time.sleep(3)
 
-            if r.status_code in [200, 201]:
-                print(f"🎉🎉 পোস্ট সরাসরি সফলভাবে লাইভ পাবলিশ হয়েছে: {title}")
+            list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
+            lr = requests.get(list_url, headers=headers, timeout=25)
+            
+            draft_id = None
+            if lr.status_code == 200:
+                draft_list = lr.json().get("draft_posts") or []
+                if draft_list:
+                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0)), reverse=True)
+                    draft_id = str(sorted_drafts[0].get("id"))
+
+            if not draft_id:
+                print("❌ ড্রাফট আইডি পাওয়া যায়নি।")
+                return False
+
+            print(f"ধাপ ২: ড্রাফট আইডি {draft_id} দিয়ে লাইভ পাবলিশ করা হচ্ছে...")
+            publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
+            
+            pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
+            print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
+
+            if pr.status_code in [200, 201]:
+                print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
                 return True
-        except Exception as e:
-            print(f"রিকোয়েস্ট এরর ({url}): {e}")
+        else:
+            print(f"ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
+    except Exception as e:
+        print(f"পোস্ট এরর: {e}")
 
     return False
 
@@ -182,7 +218,7 @@ def main():
 
     data = load_data()
 
-    # দৈনিক সীমা চেক (সর্বোচ্চ ২টি পোস্ট)
+    # দৈনিক ১টি পোস্টের সীমা চেক
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -202,12 +238,10 @@ def main():
         print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।")
         return
 
-    # প্রতি রানে ১টি করে পোস্ট পাঠানো হবে
     permlink_to_post = data["queue"].pop(0)
     post_info = get_post_details(permlink_to_post)
 
     if not post_info or "title" not in post_info:
-        print(f"পোস্ট ডিটেইলস মেলেনি, স্কিপ: {permlink_to_post}")
         data.setdefault("posted", []).append(permlink_to_post)
         save_data(data)
         return
@@ -224,14 +258,14 @@ def main():
         pass
 
     print(f"\nপ্রসেস করা হচ্ছে: {title}")
-    success = post_to_serey_direct(token, title, body, tags)
+    success = post_to_serey_verified(token, title, body, tags)
 
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
-        # সফল না হলে কিউয়ের শেষে দিয়ে রাখা হলো
+        # সাময়িক সমস্যা হলে কিউতে রেখে দেওয়া
         data["queue"].append(permlink_to_post)
 
     save_data(data)
