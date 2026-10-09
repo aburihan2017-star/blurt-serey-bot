@@ -9,9 +9,10 @@
   "community_title": "Bengali Community",
   "type": 1,
   "post_to_blockchain": true,
-  "timestamps": [],
+  "timestamps": [
+    1791561142098
+  ],
   "queue": [
-    "61bxre-splinterlands-ranked-battle-report-another-memorable-victory-in-gold-ii-with-great-strategy",
     "4moezg-byrsonima-sericea",
     "gold-iii-passed-a-great-part-of-my-gaming-life",
     "line-blues",
@@ -111,5 +112,8 @@
     "7x4bns-opening-the-draw",
     "6lba94-the-splinterlands-is-very-memorable-for-me",
     "9b4hj-the-diamond-ii-league"
+  ],
+  "posted": [
+    "61bxre-splinterlands-ranked-battle-report-another-memorable-victory-in-gold-ii-with-great-strategy"
   ]
 }
