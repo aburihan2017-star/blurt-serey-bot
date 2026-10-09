@@ -1,7 +1,9 @@
 {
-  "queue": [],
-  "posted": [
-    "the-joy-of-playing-games-is-priceless-no-matter-the-score"
-  ],
-  "timestamps": []
+  "title": "...",
+  "description": "<p>...</p>",
+  "categories": ["news", "others"],
+  "community_id": 2,
+  "community_title": "Bengali Community",
+  "type": 1,
+  "post_to_blockchain": true
 }
