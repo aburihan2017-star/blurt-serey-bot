@@ -1,301 +1,208 @@
-import json
-import os
-import re
-import time
-from datetime import datetime, timedelta
-import requests
+const fs = require('fs');
+const axios = require('axios');
+const steem = require('steem');
 
-# কনফিগারেশন
-BLURT_USER = "aburihan1"
-SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
-SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
+// কনফিগারেশন
+const BLURT_USER = 'aburihan1';
+const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123';
+const SEREY_POSTING_KEY = process.env.SEREY_POSTING_KEY;
 
-COMMUNITY_NAME = "Bengali Community"
-COMMUNITY_ID = 2
+const DATA_FILE = 'automation_data.json';
+const MAX_DAILY_POSTS = 2;
+const DAY_IN_MS = 86400 * 1000;
 
-BLURT_NODES = [
-    "https://blurt-rpc.saboin.com",
-    "https://rpc.blurt.one",
-    "https://blurt.world",
-]
+// সেরি ব্লকচেইন কনফিগারেশন
+steem.api.setOptions({ url: 'https://api.serey.io' });
+steem.config.set('address_prefix', 'SRY');
+steem.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
 
-DATA_FILE = "automation_data.json"
-MAX_DAILY_POSTS = 2
-DAY_IN_SECONDS = 86400
+const BLURT_NODES = [
+  'https://blurt-rpc.saboin.com',
+  'https://rpc.blurt.one',
+  'https://blurt.world',
+];
 
-BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "Referer": "https://bengali.serey.io/write/new",
-    "Origin": "https://bengali.serey.io",
+async function blurtCall(method, params) {
+  const payload = { jsonrpc: '2.0', method, params, id: 1 };
+  for (const node of BLURT_NODES) {
+    try {
+      const res = await axios.post(node, payload, { timeout: 10000 });
+      if (res.data && res.data.result) return res.data.result;
+    } catch (e) {
+      continue;
+    }
+  }
+  return null;
 }
 
+function loadData() {
+  if (fs.existsSync(DATA_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    } catch (e) {}
+  }
+  return { queue: [], posted: [], timestamps: [] };
+}
 
-def blurt_call(method, params):
-    payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
-    for node in BLURT_NODES:
-        try:
-            res = requests.post(node, json=payload, timeout=15).json()
-            if "result" in res:
-                return res["result"]
-        except Exception:
-            continue
-    return None
+function saveData(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}
 
+async function fetchOneYearOldPosts(postedSet) {
+  const oneYearAgo = new Date(Date.now() - 365 * DAY_IN_MS);
+  const beforeDate = oneYearAgo.toISOString().split('.')[0];
+  const posts = await blurtCall('condenser_api.get_discussions_by_author_before_date', [
+    BLURT_USER,
+    '',
+    beforeDate,
+    100,
+  ]);
+  if (posts) {
+    const list = [];
+    for (const p of posts.reverse()) {
+      if (p.permlink && !postedSet.has(p.permlink)) {
+        list.push(p.permlink);
+      }
+    }
+    return list;
+  }
+  return [];
+}
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"queue": [], "posted": [], "timestamps": []}
+async function getPostDetails(permlink) {
+  return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
+}
 
+function postToSereyBlockchain(title, body, permlink, tags) {
+  return new Promise((resolve) => {
+    const parentAuthor = '';
+    const parentPermlink = 'news'; // সেরি বাংলা ক্যাটাগরি
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-
-def fetch_one_year_old_posts(posted_set):
-    one_year_ago = datetime.utcnow() - timedelta(days=365)
-    before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
-    
-    posts = blurt_call(
-        "condenser_api.get_discussions_by_author_before_date",
-        [BLURT_USER, "", before_date, 100],
-    )
-    if posts:
-        new_permlinks = []
-        for p in reversed(posts):
-            plink = p.get("permlink")
-            if plink and plink not in posted_set:
-                new_permlinks.append(plink)
-        return new_permlinks
-    return []
-
-
-def get_post_details(permlink):
-    return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
-
-
-def get_serey_auth():
-    login_url = "https://global-api.serey.io/api/v2/auth/login"
-    payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
-
-    for attempt in range(1, 4):
-        try:
-            print(f"সেরিতে লগইন চেষ্টা চলছে (Attempt {attempt}/3)...")
-            r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=40)
-            if r.status_code in [200, 201]:
-                data = r.json()
-                token = (
-                    data.get("token")
-                    or data.get("accessToken")
-                    or (data.get("data", {}).get("token") if isinstance(data.get("data"), dict) else None)
-                )
-                if token:
-                    print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
-                    return token
-                print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
-            else:
-                print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
-        except requests.exceptions.Timeout:
-            print(f"টাইমআউট হয়েছে (চেষ্টা #{attempt})। ৫ সেকেন্ড পর আবার চেষ্টা...")
-            time.sleep(5)
-        except Exception as e:
-            print(f"লগইন এরর: {e}")
-            time.sleep(3)
-    return None
-
-
-def is_post_live(title):
-    try:
-        url = f"https://global-api.serey.io/api/v2/serey-web/list-by-author?author={SEREY_USER}&limit=5&offset=0"
-        r = requests.get(url, headers=BASE_HEADERS, timeout=15)
-        if r.status_code == 200:
-            posts = r.json().get("posts", [])
-            for p in posts:
-                p_title = p.get("title", "")
-                if title.strip().lower() == p_title.strip().lower():
-                    return True
-    except Exception:
-        pass
-    return False
-
-
-def clear_stuck_drafts(headers):
-    list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
-    try:
-        lr = requests.get(list_url, headers=headers, timeout=20)
-        if lr.status_code == 200:
-            draft_list = lr.json().get("draft_posts", [])
-            if draft_list:
-                for d in draft_list:
-                    d_id = d.get("id") or d.get("_id")
-                    if d_id:
-                        del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
-                        requests.delete(del_url, headers=headers, timeout=15)
-                time.sleep(2)
-    except Exception:
-        pass
-
-
-def post_to_serey(token, title, body, tags=None):
-    headers = dict(BASE_HEADERS)
-    headers["Authorization"] = f"Bearer {token}"
-
-    final_tags = ["news", "bengali-community", "others"]
-    if tags:
-        for t in tags:
-            clean_t = re.sub(r'[^a-z0-9\-]', '', str(t).lower().strip())
-            if clean_t and clean_t not in final_tags:
-                final_tags.append(clean_t)
-
-    clear_stuck_drafts(headers)
-
-    # ডুপ্লিকেট এড়াতে ইউনিক পারমালিঙ্ক তৈরি
-    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:35]
-    unique_permlink = f"{slug}-{int(time.time())}"
-
-    draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
-    draft_payload = {
-        "title": title,
-        "permlink": unique_permlink,
-        "community": COMMUNITY_NAME,
-        "community_id": COMMUNITY_ID,
-        "tags": final_tags,
-        "posts": [
-            {
-                "title": title,
-                "body": body,
-                "posts": body,
-                "permlink": unique_permlink,
-                "tags": final_tags,
-                "categories": "news",
-                "community": COMMUNITY_NAME,
-                "community_id": COMMUNITY_ID,
-            }
-        ],
+    const finalTags = ['news', 'others', 'bengali-community'];
+    if (tags && Array.isArray(tags)) {
+      tags.forEach(t => {
+        const clean = String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '');
+        if (clean && !finalTags.includes(clean)) finalTags.push(clean);
+      });
     }
 
-    try:
-        print("ধাপ ১: নতুন ড্রাফট তৈরি করা হচ্ছে...")
-        r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
-        print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
+    // HTML ফরম্যাটিং
+    let formattedBody = body;
+    if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
+      formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+    }
 
-        if r.status_code in [200, 201]:
-            print("✅ ফ্রেশ ড্রাফট সফলভাবে তৈরি হয়েছে!")
-            time.sleep(3)
+    // ব্রাউজারের লাইভ টেস্ট পোস্ট থেকে প্রাপ্ত হুবহু মেটাডাটা
+    const jsonMetadata = JSON.stringify({
+      tags: finalTags,
+      categories: ['news', 'others'],
+      community_id: 2,
+      community_title: 'Bengali Community',
+      type: 1,
+      post_to_blockchain: true,
+      app: 'serey/0.1',
+      format: 'html',
+    });
 
-            # ড্রাফট আইডি নেওয়া
-            list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
-            lr = requests.get(list_url, headers=headers, timeout=25)
-            
-            draft_id = None
-            if lr.status_code == 200:
-                draft_list = lr.json().get("draft_posts") or []
-                if draft_list:
-                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0)), reverse=True)
-                    draft_id = str(sorted_drafts[0].get("id"))
+    console.log(`🚀 সেরি ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
+    console.log(`📌 Permlink: ${permlink}`);
 
-            if not draft_id:
-                print("❌ ড্রাফট আইডি মেলেনি।")
-                return False
+    steem.broadcast.comment(
+      SEREY_POSTING_KEY,
+      parentAuthor,
+      parentPermlink,
+      SEREY_USER,
+      permlink,
+      title,
+      formattedBody,
+      jsonMetadata,
+      async (err, result) => {
+        if (err) {
+          console.error(`❌ পোস্ট ব্রডকাস্ট এরর:`, err.message || err);
+          resolve(false);
+        } else {
+          console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে! TxID:`, result?.id || 'Success');
+          // সেরি ওয়েব ক্যাশ রিফ্রেশ করা
+          try {
+            await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
+          } catch (e) {}
+          resolve(true);
+        }
+      }
+    );
+  });
+}
 
-            print(f"ধাপ ২: ড্রাফট আইডি {draft_id} দিয়ে লাইভ পাবলিশ করা হচ্ছে...")
-            publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
-            
-            # রান #৪৩ এর সফল পদ্ধতি অনুযায়ী কল
-            pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
-            print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
+async function main() {
+  console.log('বট চালু হচ্ছে...');
+  if (!SEREY_POSTING_KEY) {
+    console.error('ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!');
+    return;
+  }
 
-            if pr.status_code in [200, 201]:
-                print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
-                return True
+  const data = loadData();
+  const now = Date.now();
 
-            # ৫ সেকেন্ড পর প্রোফাইল ভেরিফিকেশন
-            time.sleep(5)
-            if is_post_live(title):
-                print(f"🎉🎉 পোস্ট নিশ্চিতভাবে আপনার প্রোফাইলে লাইভ পাওয়া গেছে: {title}")
-                return True
-        else:
-            print(f"ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
-    except Exception as e:
-        print(f"পোস্ট এরর: {e}")
+  // দৈনিক সীমা চেক
+  data.timestamps = (data.timestamps || []).filter(t => now - t < DAY_IN_MS);
+  if (data.timestamps.length >= MAX_DAILY_POSTS) {
+    console.log(`আজকের দৈনিক সীমা (${MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।`);
+    return;
+  }
 
-    return False
+  const postedSet = new Set(data.posted || []);
 
+  if (!data.queue || data.queue.length === 0) {
+    console.log('ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...');
+    const fetched = await fetchOneYearOldPosts(postedSet);
+    data.queue = fetched;
+    saveData(data);
+  }
 
-def main():
-    print("বট চালু হচ্ছে...")
-    if not SEREY_PASSWORD:
-        print("ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!")
-        return
+  if (!data.queue || data.queue.length === 0) {
+    console.log('পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।');
+    return;
+  }
 
-    token = get_serey_auth()
-    if not token:
-        print("সেরিতে লগইন ব্যর্থ হয়েছে।")
-        return
+  const permlinkToPost = data.queue.shift();
+  const postInfo = await getPostDetails(permlinkToPost);
 
-    data = load_data()
+  if (!postInfo || !postInfo.title) {
+    console.log(`পোস্ট ডাটা পাওয়া যায়নি, স্কিপ: ${permlinkToPost}`);
+    data.posted = data.posted || [];
+    data.posted.push(permlinkToPost);
+    saveData(data);
+    return;
+  }
 
-    # দৈনিক সীমা চেক (সর্বোচ্চ ২টি পোস্ট)
-    current_time = time.time()
-    data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
+  const title = postInfo.title;
+  const body = postInfo.body;
 
-    if len(data["timestamps"]) >= MAX_DAILY_POSTS:
-        print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।")
-        return
+  let tags = [];
+  try {
+    const meta = JSON.parse(postInfo.json_metadata || '{}');
+    if (meta.tags && Array.isArray(meta.tags)) tags = meta.tags;
+  } catch (e) {}
 
-    posted_set = set(data.get("posted", []))
+  // ইউনিক পারমালিঙ্ক তৈরি
+  const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const sereyPermlink = `${cleanTitle.slice(0, 40)}-${Date.now().toString(36)}`;
 
-    if not data.get("queue"):
-        print("ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...")
-        fetched_permlinks = fetch_one_year_old_posts(posted_set)
-        data["queue"] = fetched_permlinks
-        save_data(data)
+  console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
+  const success = await postToSereyBlockchain(title, body, sereyPermlink, tags);
 
-    if not data["queue"]:
-        print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।")
-        return
+  if (success) {
+    data.posted = data.posted || [];
+    data.posted.push(permlinkToPost);
+    data.timestamps = data.timestamps || [];
+    data.timestamps.push(now);
+    console.log('ডাটা সেভ করা হয়েছে।');
+  } else {
+    data.queue.push(permlinkToPost);
+  }
 
-    permlink_to_post = data["queue"].pop(0)
-    post_info = get_post_details(permlink_to_post)
+  saveData(data);
+  console.log('\nপ্রক্রিয়া সম্পন্ন হয়েছে।');
+}
 
-    if not post_info or "title" not in post_info:
-        print(f"পোস্ট ডিটেইলস মেলেনি, স্কিপ: {permlink_to_post}")
-        data.setdefault("posted", []).append(permlink_to_post)
-        save_data(data)
-        return
-
-    title = post_info.get("title", "")
-    body = post_info.get("body", "")
-
-    tags = []
-    try:
-        json_meta = json.loads(post_info.get("json_metadata", "{}"))
-        if "tags" in json_meta and isinstance(json_meta["tags"], list):
-            tags = json_meta["tags"]
-    except Exception:
-        pass
-
-    print(f"\nপ্রসেস করা হচ্ছে: {title}")
-    success = post_to_serey(token, title, body, tags)
-
-    if success:
-        data.setdefault("posted", []).append(permlink_to_post)
-        data.setdefault("timestamps", []).append(current_time)
-        print("ডাটা সেভ করা হয়েছে।")
-    else:
-        # কোনো কারণে আটকে গেলে কিউয়ের শেষে পাঠানো
-        data["queue"].append(permlink_to_post)
-
-    save_data(data)
-    print("\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।")
-
-
-if __name__ == "__main__":
-    main()
+main();
