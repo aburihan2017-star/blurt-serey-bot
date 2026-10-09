@@ -11,8 +11,8 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি অফিসিয়াল নেটওয়ার্ক কনফিগারেশন
-serey.api.setOptions({ url: 'https://api.serey.io' });
+// সেরি ক্লাসিক ব্লকচেইন কনফিগারেশন (useAppbaseApi: false বাধ্যতামূলক)
+serey.api.setOptions({ url: 'https://api.serey.io', useAppbaseApi: false });
 serey.config.set('address_prefix', 'SRY');
 serey.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
 
@@ -76,7 +76,7 @@ async function getPostDetails(permlink) {
 function broadcastToSerey(title, body, permlink, tags) {
   return new Promise((resolve) => {
     const parentAuthor = '';
-    const parentPermlink = 'news'; // ব্রাউজার টেস্টের সফল ক্যাটাগরি
+    const parentPermlink = 'news';
 
     const finalTags = ['news', 'others', 'bengali-community'];
     if (tags && Array.isArray(tags)) {
@@ -86,13 +86,11 @@ function broadcastToSerey(title, body, permlink, tags) {
       });
     }
 
-    // HTML ফরম্যাট
     let formattedBody = body;
     if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
       formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
     }
 
-    // স্ক্রিনশট ৩:২০ অনুযায়ী পূর্ণাঙ্গ সেরি মেটাডাটা
     const jsonMetadata = JSON.stringify({
       tags: finalTags,
       categories: ['news', 'others'],
@@ -122,7 +120,6 @@ function broadcastToSerey(title, body, permlink, tags) {
           resolve(false);
         } else {
           console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে! TxID:`, result?.id || 'Success');
-          // ক্যাশ রিফ্রেশ
           try {
             await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
           } catch (e) {}
@@ -143,7 +140,6 @@ async function main() {
   const data = loadData();
   const now = Date.now();
 
-  // দৈনিক সীমা চেক
   data.timestamps = (data.timestamps || []).filter(t => now - t < DAY_IN_MS);
   if (data.timestamps.length >= MAX_DAILY_POSTS) {
     console.log(`আজকের দৈনিক সীমা (${MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।`);
@@ -184,7 +180,6 @@ async function main() {
     if (meta.tags && Array.isArray(meta.tags)) tags = meta.tags;
   } catch (e) {}
 
-  // ইউনিক পারমালিঙ্ক তৈরি
   const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
 
@@ -202,7 +197,7 @@ async function main() {
   }
 
   saveData(data);
-  console.log('\nপ্রক্রিয়া সম্পন্ন হয়েছে।');
+  console.log('\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।');
 }
 
 main();
