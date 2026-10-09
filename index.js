@@ -1,6 +1,6 @@
 const fs = require('fs');
 const axios = require('axios');
-const steem = require('steem');
+const serey = require('sereyjs');
 
 // কনফিগারেশন
 const BLURT_USER = 'aburihan1';
@@ -11,10 +11,10 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি ব্লকচেইন কনফিগারেশন
-steem.api.setOptions({ url: 'https://api.serey.io' });
-steem.config.set('address_prefix', 'SRY');
-steem.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
+// সেরি অফিসিয়াল নেটওয়ার্ক কনফিগারেশন
+serey.api.setOptions({ url: 'https://api.serey.io' });
+serey.config.set('address_prefix', 'SRY');
+serey.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
 
 const BLURT_NODES = [
   'https://blurt-rpc.saboin.com',
@@ -48,17 +48,23 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-async function fetchOneYearOldPosts() {
+async function fetchOneYearOldPosts(postedSet) {
   const oneYearAgo = new Date(Date.now() - 365 * DAY_IN_MS);
   const beforeDate = oneYearAgo.toISOString().split('.')[0];
   const posts = await blurtCall('condenser_api.get_discussions_by_author_before_date', [
     BLURT_USER,
     '',
     beforeDate,
-    30,
+    100,
   ]);
   if (posts) {
-    return posts.map(p => p.permlink).reverse();
+    const list = [];
+    for (const p of posts.reverse()) {
+      if (p.permlink && !postedSet.has(p.permlink)) {
+        list.push(p.permlink);
+      }
+    }
+    return list;
   }
   return [];
 }
@@ -67,12 +73,12 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-function postToSereyBlockchain(title, body, permlink, tags) {
+function broadcastToSerey(title, body, permlink, tags) {
   return new Promise((resolve) => {
     const parentAuthor = '';
-    const parentPermlink = 'bengali-community'; // মূল ক্যাটাগরি
+    const parentPermlink = 'news'; // ব্রাউজার টেস্টের সফল ক্যাটাগরি
 
-    const finalTags = ['news', 'bengali-community', 'others'];
+    const finalTags = ['news', 'others', 'bengali-community'];
     if (tags && Array.isArray(tags)) {
       tags.forEach(t => {
         const clean = String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '');
@@ -80,33 +86,46 @@ function postToSereyBlockchain(title, body, permlink, tags) {
       });
     }
 
-    // বাংলা কমিউনিটি ওয়েবসাইটে প্রদর্শনের জন্য পূর্ণাঙ্গ মেটাডাটা
+    // HTML ফরম্যাট
+    let formattedBody = body;
+    if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
+      formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+    }
+
+    // স্ক্রিনশট ৩:২০ অনুযায়ী পূর্ণাঙ্গ সেরি মেটাডাটা
     const jsonMetadata = JSON.stringify({
       tags: finalTags,
-      community: 'Bengali Community',
-      community_id: 2,
       categories: ['news', 'others'],
+      community_id: 2,
+      community_title: 'Bengali Community',
+      type: 1,
+      post_to_blockchain: true,
       app: 'serey/0.1',
-      format: 'markdown',
+      format: 'html',
     });
 
-    console.log(`🚀 সেরি ব্লকচেইনে ব্রডকাস্ট করা হচ্ছে: ${title}`);
+    console.log(`🚀 সেরি ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
+    console.log(`📌 পারমালিঙ্ক: ${permlink}`);
 
-    steem.broadcast.comment(
+    serey.broadcast.comment(
       SEREY_POSTING_KEY,
       parentAuthor,
       parentPermlink,
       SEREY_USER,
       permlink,
       title,
-      body,
+      formattedBody,
       jsonMetadata,
-      (err, result) => {
+      async (err, result) => {
         if (err) {
-          console.error(`❌ পোস্ট ব্রডকাস্ট এরর:`, err.message || err);
+          console.error(`❌ ব্রডকাস্ট এরর:`, err.message || err);
           resolve(false);
         } else {
           console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে! TxID:`, result?.id || 'Success');
+          // ক্যাশ রিফ্রেশ
+          try {
+            await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
+          } catch (e) {}
           resolve(true);
         }
       }
@@ -131,16 +150,17 @@ async function main() {
     return;
   }
 
+  const postedSet = new Set(data.posted || []);
+
   if (!data.queue || data.queue.length === 0) {
     console.log('ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...');
-    const fetched = await fetchOneYearOldPosts();
-    const postedSet = new Set(data.posted || []);
-    data.queue = fetched.filter(p => !postedSet.has(p));
+    const fetched = await fetchOneYearOldPosts(postedSet);
+    data.queue = fetched;
     saveData(data);
   }
 
   if (!data.queue || data.queue.length === 0) {
-    console.log('পোস্ট করার মতো কোনো পোস্ট পাওয়া যায়নি।');
+    console.log('পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।');
     return;
   }
 
@@ -166,9 +186,10 @@ async function main() {
 
   // ইউনিক পারমালিঙ্ক তৈরি
   const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const sereyPermlink = `${cleanTitle.slice(0, 45)}-${Math.floor(Date.now() / 1000)}`;
+  const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
 
-  const success = await postToSereyBlockchain(title, body, sereyPermlink, tags);
+  console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
+  const success = await broadcastToSerey(title, body, sereyPermlink, tags);
 
   if (success) {
     data.posted = data.posted || [];
