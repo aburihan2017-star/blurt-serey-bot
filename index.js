@@ -1,3 +1,31 @@
+// ১. WebSocket লেভেলে { } কে [ ] বানানোর গ্লোবাল ইন্টারসেপ্টর (C++ Assert Fix)
+const WebSocket = require('ws');
+const origSend = WebSocket.prototype.send;
+WebSocket.prototype.send = function (data, ...args) {
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      if (
+        parsed.method === 'call' &&
+        Array.isArray(parsed.params) &&
+        parsed.params.length >= 3 &&
+        typeof parsed.params[2] === 'object' &&
+        !Array.isArray(parsed.params[2]) &&
+        Object.keys(parsed.params[2]).length === 0
+      ) {
+        parsed.params[2] = [];
+        data = JSON.stringify(parsed);
+      }
+    } catch (e) {
+      data = data.replace(
+        '["database_api","get_dynamic_global_properties",{}]',
+        '["database_api","get_dynamic_global_properties",[]]'
+      );
+    }
+  }
+  return origSend.call(this, data, ...args);
+};
+
 const fs = require('fs');
 const axios = require('axios');
 const serey = require('sereyjs');
@@ -11,26 +39,10 @@ const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-// সেরি অফিসিয়াল WebSocket সংযোগ
-serey.api.setOptions({ url: 'wss://api.serey.io', useAppbaseApi: false });
+// সেরি অফিসিয়াল নেটওয়ার্ক কনফিগারেশন
+serey.api.setOptions({ url: 'wss://api.serey.io' });
 serey.config.set('address_prefix', 'SRY');
 serey.config.set('chain_id', '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324');
-
-// sereyjs লাইব্রেরির {} প্যারামিটার বাগ ফিক্স (C++ Assert Exception সমাধান)
-const origCall = serey.api.call.bind(serey.api);
-serey.api.call = function (method, params, callback) {
-  if (typeof params === 'function') {
-    callback = params;
-    params = [];
-  } else if (!params || !Array.isArray(params)) {
-    params = [];
-  }
-  return origCall(method, params, callback);
-};
-
-serey.api.getDynamicGlobalProperties = function (callback) {
-  return serey.api.call('get_dynamic_global_properties', [], callback);
-};
 
 const BLURT_NODES = [
   'https://blurt-rpc.saboin.com',
