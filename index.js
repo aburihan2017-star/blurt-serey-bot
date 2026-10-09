@@ -2,7 +2,7 @@ const fs = require('fs');
 const axios = require('axios');
 const WebSocket = require('ws');
 
-// ইন্সটল থাকা sereyjs প্যাকেজ ব্যবহার (module not found ফিক্স)
+// sereyjs প্যাকেজ
 let serey;
 try {
   serey = require('sereyjs');
@@ -83,7 +83,7 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-// সেরি নোডে সরাসরি নিরাপদ WebSocket RPC কল (C++ এরে নিশ্চিত করে)
+// সেরি নোডে নিরাপদ WebSocket RPC কল
 function sendSereyRpc(ws, api, method, params = []) {
   return new Promise((resolve, reject) => {
     const id = Math.floor(Math.random() * 100000);
@@ -131,15 +131,17 @@ function postToSereyNative(title, body, permlink, tags) {
       try {
         console.log('📡 সেরি ব্লকচেইন নোডের সাথে সরাসরি সংযোগ স্থাপিত হয়েছে!');
 
-        // ১. সঠিক অ্যারে [] দিয়ে ডাইনামিক প্রপার্টিজ আনা (C++ Assert Fix)
+        // ১. ডাইনামিক প্রপার্টিজ আনা
         const dgp = await sendSereyRpc(ws, 'database_api', 'get_dynamic_global_properties', []);
         
         const headBlockNumber = dgp.head_block_number;
         const headBlockId = dgp.head_block_id;
-        const refBlockNum = (headBlockNumber - 1) & 0xffff;
+
+        // TaPoS ফিক্স: headBlockId এর সাথে সরাসরি headBlockNumber ম্যাচিং
+        const refBlockNum = headBlockNumber & 0xffff;
         const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
 
-        // টাইমস্ট্যাম্প ও মেয়াদ (Expiration)
+        // টাইমস্ট্যাম্প ও এক্সপায়ার্ড টাইম
         const blockTime = new Date(dgp.time + 'Z').getTime();
         const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
 
