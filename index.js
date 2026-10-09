@@ -1,7 +1,14 @@
 const fs = require('fs');
 const axios = require('axios');
 const WebSocket = require('ws');
-const steem = require('steem');
+
+// ইন্সটল থাকা sereyjs প্যাকেজ ব্যবহার (module not found ফিক্স)
+let serey;
+try {
+  serey = require('sereyjs');
+} catch (e) {
+  serey = require('steem');
+}
 
 // কনফিগারেশন
 const BLURT_USER = 'aburihan1';
@@ -15,9 +22,9 @@ const DAY_IN_MS = 86400 * 1000;
 const SEREY_CHAIN_ID = '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324';
 const SEREY_PREFIX = 'SRY';
 
-// Steem লাইব্রেরিতে সেরি চেইন কনফিগ সেট
-steem.config.set('address_prefix', SEREY_PREFIX);
-steem.config.set('chain_id', SEREY_CHAIN_ID);
+// সেরি চেইন কনফিগ সেট
+serey.config.set('address_prefix', SEREY_PREFIX);
+serey.config.set('chain_id', SEREY_CHAIN_ID);
 
 const BLURT_NODES = [
   'https://blurt-rpc.saboin.com',
@@ -185,7 +192,7 @@ function postToSereyNative(title, body, permlink, tags) {
 
         // ৩. পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা
         console.log(`🔑 ট্রানজাকশন সাইন করা হচ্ছে...`);
-        const signedTx = steem.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
+        const signedTx = serey.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
 
         console.log(`🚀 ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
         
