@@ -105,35 +105,8 @@ def get_serey_auth():
     return None
 
 
-def extract_id(d):
-    if not isinstance(d, dict):
-        return None
-    for key in ["id", "_id", "draftId", "draft_id"]:
-        if key in d and d[key] is not None:
-            return str(d[key])
-    return None
-
-
-def clear_stuck_drafts(headers):
-    list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
-    try:
-        lr = requests.get(list_url, headers=headers, timeout=20)
-        if lr.status_code == 200:
-            draft_list = lr.json().get("draft_posts", [])
-            if draft_list:
-                print(f"🧹 পুরনো {len(draft_list)}টি ড্রাফট পরিষ্কার করা হচ্ছে...")
-                for d in draft_list:
-                    d_id = d.get("id") or d.get("_id")
-                    if d_id:
-                        del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
-                        requests.delete(del_url, headers=headers, timeout=15)
-                time.sleep(2)
-    except Exception as e:
-        print("ক্লিনআপ সতর্কতা:", e)
-
-
 def is_post_live(title):
-    """সেরি ওয়েবসাইটে পোস্টটি সরাসরি লাইভ হয়েছে কিনা যাচাই করা"""
+    """সেরি ওয়েবসাইটে পোস্টটি সরাসরি লাইভ হয়েছে কিনা নিশ্চিত করা"""
     try:
         url = f"https://global-api.serey.io/api/v2/serey-web/list-by-author?author={SEREY_USER}&limit=5&offset=0"
         r = requests.get(url, headers=BASE_HEADERS, timeout=15)
@@ -141,14 +114,15 @@ def is_post_live(title):
             posts = r.json().get("posts", [])
             for p in posts:
                 p_title = p.get("title", "")
-                if title.lower() in p_title.lower() or p_title.lower() in title.lower():
+                if title.strip().lower() == p_title.strip().lower():
                     return True
     except Exception:
         pass
     return False
 
 
-def post_to_serey(token, title, body, tags=None):
+def post_to_serey_native(token, title, body, tags=None):
+    """সরাসরি অফিশিয়াল পাবলিশ API কল করা (ড্রাফট এভয়েড করে সরাসরি পোস্ট)"""
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
@@ -159,8 +133,43 @@ def post_to_serey(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    clear_stuck_drafts(headers)
+    # ইউনিক পারমালিঙ্ক
+    clean_title = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+    unique_permlink = f"{clean_title[:40]}-{int(time.time())}"
 
+    # সরাসরি আর্টিকেল পোস্ট করার এন্ডপয়েন্ট
+    post_payload = {
+        "title": title,
+        "body": body,
+        "permlink": unique_permlink,
+        "community": COMMUNITY_NAME,
+        "community_id": COMMUNITY_ID,
+        "categories": "news",
+        "tags": final_tags,
+        "status": "publish",
+        "is_published": True,
+        "publish": True,
+    }
+
+    # ১. সরাসরি আর্টিকেল তৈরির এন্ডপয়েন্টে চেষ্টা
+    endpoints = [
+        "https://global-api.serey.io/api/v2/articles",
+        "https://global-api.serey.io/api/v2/posts",
+        "https://bengali.serey.io/api/post",
+    ]
+
+    for ep in endpoints:
+        try:
+            r = requests.post(ep, json=post_payload, headers=headers, timeout=25)
+            if r.status_code in [200, 201]:
+                print(f"🎉 পোস্ট সরাসরি এপিআই দিয়ে লাইভ হয়েছে ({ep})!")
+                time.sleep(3)
+                if is_post_live(title):
+                    return True
+        except Exception:
+            pass
+
+    # ২. ড্রাফট ও পাবলিশ ফ্লো (যাতে ইন-প্রোগ্রেস এড়িয়ে ফ্রেশ পাবলিশ নিশ্চিত হয়)
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
     draft_payload = {
         "title": title,
@@ -181,58 +190,47 @@ def post_to_serey(token, title, body, tags=None):
     }
 
     try:
-        print("ধাপ ১: নতুন পোস্ট ড্রাফট তৈরি করা হচ্ছে...")
+        print("ধাপ ১: ফ্রেশ ড্রাফট তৈরি করা হচ্ছে...")
         r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
-        print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
-
         if r.status_code in [200, 201]:
-            print("✅ পোস্ট সফলভাবে সেরির সার্ভারে জমা হয়েছে!")
-            
-            # সার্ভার ব্যাকগ্রাউন্ডে অটো-পোস্ট প্রসেস করার জন্য ১০ সেকেন্ড অপেক্ষা
-            print("⏳ সেরি ব্যাকগ্রাউন্ড প্রসেসিংয়ের জন্য ১০ সেকেন্ড অপেক্ষা করা হচ্ছে...")
-            time.sleep(10)
-
-            # সরাসরি প্রোফাইল চেক করা যে পোস্টটি লাইভ হয়েছে কিনা
-            if is_post_live(title):
-                print(f"🎉🎉 পোস্ট সরাসরি বাংলা কমিউনিটিতে লাইভ হয়েছে: {title}")
-                return True
-
-            # ব্যাকআপ ধাপ: যদি স্বয়ংক্রিয়ভাবে লাইভ না হয়ে থাকে তবে আইডি দিয়ে কল করা
-            print("ধাপ ২: ড্রাফট আইডি দিয়ে চূড়ান্ত পাবলিশ যাচাই করা হচ্ছে...")
+            time.sleep(3)
+            # ড্রাফট আইডি আনা
             list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
             lr = requests.get(list_url, headers=headers, timeout=25)
-
-            draft_id = None
             if lr.status_code == 200:
-                drafts_data = lr.json()
-                draft_list = drafts_data.get("draft_posts") or drafts_data.get("data") or []
+                draft_list = lr.json().get("draft_posts") or []
                 if draft_list:
-                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0) or x.get("_id", 0)), reverse=True)
-                    draft_id = str(sorted_drafts[0].get("id") or sorted_drafts[0].get("_id"))
-
-            if draft_id:
-                publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
-                pr = requests.post(publish_url, json={"id": int(draft_id) if draft_id.isdigit() else draft_id}, headers=headers, timeout=35)
-                print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
-
-                if pr.status_code in [200, 201]:
-                    print(f"🎉🎉 পোস্ট সফলভাবে লাইভ পাবলিশ হয়েছে: {title}")
-                    return True
-                elif "inprogress" in pr.text.lower() or "already" in pr.text.lower():
-                    # ইন-প্রোগ্রেস মানেই ব্যাকএন্ড এটি পাবলিশ করছে
-                    print(f"🎉 পোস্টটি ব্যাকগ্রাউন্ডে সফলভাবে প্রসেস হয়ে লাইভ হচ্ছে: {title}")
-                    return True
-
-            # সর্বশেষ একবার প্রোফাইল দেখে নিশ্চিত হওয়া
-            time.sleep(5)
-            if is_post_live(title):
-                print(f"🎉🎉 পোস্ট নিশ্চিতভাবে প্রোফাইলে লাইভ পাওয়া গেছে: {title}")
-                return True
-        else:
-            print(f"❌ পোস্ট তৈরিতে ব্যর্থ: {r.text}")
+                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0)), reverse=True)
+                    draft_id = str(sorted_drafts[0].get("id"))
+                    
+                    print(f"ধাপ ২: ড্রাফট আইডি {draft_id} দিয়ে পাবলিশ রিকোয়েস্ট পাঠানো হচ্ছে...")
+                    publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
+                    
+                    # সম্পূর্ণ মেটাডাটা সহ পাবলিশ কল
+                    pr = requests.post(
+                        publish_url,
+                        json={"id": int(draft_id), "community_id": COMMUNITY_ID, "categories": "news"},
+                        headers=headers,
+                        timeout=35
+                    )
+                    print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
+                    
+                    # ১৫ সেকেন্ড অপেক্ষা করে প্রোফাইল থেকে যাচাই
+                    print("🔍 পোস্টটি প্রোফাইলে এসেছে কিনা যাচাই করা হচ্ছে...")
+                    for check_round in range(1, 4):
+                        time.sleep(5)
+                        if is_post_live(title):
+                            print(f"🎉🎉 পোস্ট নিশ্চিতভাবে আপনার প্রোফাইলে লাইভ হয়ে গেছে: {title}")
+                            return True
     except Exception as e:
-        print(f"পোস্ট রিকোয়েস্ট এরর: {e}")
+        print(f"পোস্ট এরর: {e}")
 
+    # সর্বশেষ প্রোফাইল চেক
+    if is_post_live(title):
+        print(f"🎉🎉 পোস্টটি লাইভ তালিকায় পাওয়া গেছে: {title}")
+        return True
+
+    print("❌ পোস্টটি লাইভ হয়নি।")
     return False
 
 
@@ -247,10 +245,9 @@ def main():
         print("সেরিতে লগইন ব্যর্থ হয়েছে।")
         return
 
-    print(f"নির্বাচিত কমিউনিটি: {COMMUNITY_NAME} (ID: {COMMUNITY_ID})")
-
     data = load_data()
 
+    # দৈনিক সীমা চেক (সর্বোচ্চ ২টি পোস্ট)
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -291,13 +288,15 @@ def main():
         pass
 
     print(f"\nপ্রসেস করা হচ্ছে: {title}")
-    success = post_to_serey(token, title, body, tags)
+    success = post_to_serey_native(token, title, body, tags)
 
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
+        # সফল না হলে টাইমস্ট্যাম্প যোগ হবে না এবং পোস্টটি কিউতে থাকবে
+        print("পোস্ট লাইভ না হওয়ায় টাইমস্ট্যাম্পে যোগ করা হয়নি।")
         data["queue"].append(permlink_to_post)
 
     save_data(data)
