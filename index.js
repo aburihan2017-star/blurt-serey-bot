@@ -2,7 +2,7 @@ const fs = require('fs');
 const axios = require('axios');
 const WebSocket = require('ws');
 
-// sereyjs প্যাকেজ
+// sereyjs লাইব্রেরি
 let serey;
 try {
   serey = require('sereyjs');
@@ -22,7 +22,7 @@ const DAY_IN_MS = 86400 * 1000;
 const SEREY_CHAIN_ID = '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324';
 const SEREY_PREFIX = 'SRY';
 
-// সেরি চেইন কনফিগ সেট
+// সেরি চেইন কনফিগ
 serey.config.set('address_prefix', SEREY_PREFIX);
 serey.config.set('chain_id', SEREY_CHAIN_ID);
 
@@ -83,7 +83,7 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-// সেরি নোডে নিরাপদ WebSocket RPC কল
+// সেরি ব্লকচেইন নোডে সরাসরি নিরাপদ কল
 function sendSereyRpc(ws, api, method, params = []) {
   return new Promise((resolve, reject) => {
     const id = Math.floor(Math.random() * 100000);
@@ -117,7 +117,7 @@ function sendSereyRpc(ws, api, method, params = []) {
   });
 }
 
-// সেরি ব্লকচেইনে সরাসরি সাইন ও ব্রডকাস্ট ফাংশন
+// সেরি ব্লকচেইনে সরাসরি পোস্ট ব্রডকাস্ট (ব্রাউজারের সফল পোস্টের অনুরূপ)
 function postToSereyNative(title, body, permlink, tags) {
   return new Promise(async (resolve) => {
     const ws = new WebSocket('wss://api.serey.io');
@@ -131,17 +131,17 @@ function postToSereyNative(title, body, permlink, tags) {
       try {
         console.log('📡 সেরি ব্লকচেইন নোডের সাথে সরাসরি সংযোগ স্থাপিত হয়েছে!');
 
-        // ১. ডাইনামিক প্রপার্টিজ আনা
+        // ১. ডাইনামিক প্রপার্টিজ নেওয়া
         const dgp = await sendSereyRpc(ws, 'database_api', 'get_dynamic_global_properties', []);
         
         const headBlockNumber = dgp.head_block_number;
         const headBlockId = dgp.head_block_id;
 
-        // TaPoS ফিক্স: headBlockId এর সাথে সরাসরি headBlockNumber ম্যাচিং
+        // TaPoS ফিক্স
         const refBlockNum = headBlockNumber & 0xffff;
         const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
 
-        // টাইমস্ট্যাম্প ও এক্সপায়ার্ড টাইম
+        // টাইমস্ট্যাম্প
         const blockTime = new Date(dgp.time + 'Z').getTime();
         const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
 
@@ -159,6 +159,7 @@ function postToSereyNative(title, body, permlink, tags) {
           formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
         }
 
+        // ব্রাউজার টেস্ট পোস্ট থেকে হুবহু প্রাপ্ত মেটাডাটা
         const jsonMetadata = JSON.stringify({
           tags: finalTags,
           categories: ['news', 'others'],
@@ -170,12 +171,12 @@ function postToSereyNative(title, body, permlink, tags) {
           format: 'html',
         });
 
-        // ২. কমেন্ট অপারেশন তৈরি
+        // ২. অপারেশন অবজেক্ট তৈরি
         const op = [
           'comment',
           {
             parent_author: '',
-            parent_permlink: 'news',
+            parent_permlink: 'news', // ব্রাউজার সফল পোস্টের ক্যাটাগরি
             author: SEREY_USER,
             permlink: permlink,
             title: title,
@@ -192,18 +193,18 @@ function postToSereyNative(title, body, permlink, tags) {
           extensions: [],
         };
 
-        // ৩. পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা
+        // ৩. সাইন করা
         console.log(`🔑 ট্রানজাকশন সাইন করা হচ্ছে...`);
         const signedTx = serey.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
 
-        console.log(`🚀 ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
+        console.log(`🚀 সেরি ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
         
-        // ৪. সরাসরি নোডে ব্রডকাস্ট পাঠানো
+        // ৪. সরাসরি নোডে ব্রডকাস্ট
         await sendSereyRpc(ws, 'network_broadcast_api', 'broadcast_transaction', [signedTx]);
 
-        console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে!`);
+        console.log(`🎉🎉 পোস্ট সরাসরি সেরি ব্লকচেইনে লাইভ হয়েছে!`);
         
-        // সেরি ওয়েবসাইট ক্যাশ রিফ্রেশ
+        // সেরি ওয়েবসাইট ডাটাবেজ ক্যাশ সিঙ্ক
         try {
           await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
         } catch (e) {}
