@@ -2,12 +2,15 @@ name: Blurt to Serey Auto Post
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # প্রতি ৬ ঘণ্টা পর পর স্বয়ংক্রিয়ভাবে চলবে
+  workflow_dispatch:      # ম্যানুয়ালি রান করার বাটন
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write     # automation_data.json সেভ করে পুশ করার অনুমতি
 
     steps:
       - name: Checkout Code
@@ -34,5 +37,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add automation_data.json
-          git commit -m "Update automation data [skip ci]" || echo "No changes to commit"
+          git commit -m "Update post queue and history [skip ci]" || echo "No changes to commit"
           git push
