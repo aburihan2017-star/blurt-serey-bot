@@ -23,6 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          rm -f package.json package-lock.json
           npm init -y
           npm install axios sereyjs
 
