@@ -20,8 +20,8 @@ BLURT_NODES = [
 ]
 
 DATA_FILE = "automation_data.json"
-MAX_DAILY_POSTS = 1
-DAY_IN_SECONDS = 86400
+MAX_DAILY_POSTS = 2       # দিনে সর্বোচ্চ ২টি পোস্ট
+DAY_IN_SECONDS = 72000    # ২০ ঘণ্টা উইন্ডো (সকাল ও রাতের পোস্ট নিশ্চিত করার জন্য)
 
 BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -99,11 +99,13 @@ def get_serey_auth():
                 if token:
                     print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
                     return token
+                print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
             else:
                 print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
         except requests.exceptions.Timeout:
             time.sleep(5)
         except Exception as e:
+            print(f"লগইন এরর: {e}")
             time.sleep(3)
     return None
 
@@ -138,6 +140,7 @@ def post_to_serey_verified(token, title, body, tags=None):
 
     clear_stuck_drafts(headers)
 
+    # HTML ফরম্যাটিং
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
@@ -218,7 +221,7 @@ def main():
 
     data = load_data()
 
-    # দৈনিক ১টি পোস্টের সীমা চেক
+    # দৈনিক ২টি পোস্টের সীমা চেক (২০ ঘণ্টার রোলিং উইন্ডো)
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -265,7 +268,6 @@ def main():
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
-        # সাময়িক সমস্যা হলে কিউতে রেখে দেওয়া
         data["queue"].append(permlink_to_post)
 
     save_data(data)
