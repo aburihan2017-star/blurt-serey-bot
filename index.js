@@ -3,18 +3,18 @@ const axios = require('axios');
 const serey = require('sereyjs');
 
 // ================= কনফিগারেশন =================
-const BLURT_USER = 'aburihan1'; // যে ব্লার্ট অ্যাকাউন্ট থেকে পোস্ট আনা হবে
-const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123'; // সেরি ইউজার
-const SEREY_POSTING_KEY = process.env.SEREY_POSTING_KEY; // সেরি পোস্টিং প্রাইভেট কি
+const BLURT_USER = 'aburihan1';                             // ব্লার্ট উৎস অ্যাকাউন্ট
+const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123'; // সেরি গন্তব্য অ্যাকাউন্ট
+const SEREY_POSTING_KEY = process.env.SEREY_POSTING_KEY;      // সেরি পোস্টিং কি
 
 const DATA_FILE = 'automation_data.json';
-const MAX_DAILY_POSTS = 2; // প্রতিদিন সর্বোচ্চ পোস্টের সংখ্যা
+const MAX_DAILY_POSTS = 2; // দিনে সর্বোচ্চ পোস্ট
 const DAY_IN_MS = 86400 * 1000;
 
 const SEREY_CHAIN_ID = '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324';
 const SEREY_PREFIX = 'SRY';
 
-// সেরি চেইন কনফিগারেশন
+// সেরি চেইন কনফিগ
 serey.config.set('address_prefix', SEREY_PREFIX);
 serey.config.set('chain_id', SEREY_CHAIN_ID);
 
@@ -24,7 +24,7 @@ const BLURT_NODES = [
   'https://blurt.world',
 ];
 
-// বডি থেকে ইমেজ / থাম্বনেইল URL বের করার ফাংশন
+// বডি থেকে ইমেজ/থাম্বনেইল বের করার ফাংশন
 function extractImagesFromBody(body) {
   const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|gif|png|webp)/gi;
   const matches = body.match(imgRegex);
@@ -82,7 +82,6 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-// সেরি ব্লকচেইন RPC কল
 async function sendSereyHttpRpc(api, method, params = []) {
   const payload = {
     jsonrpc: '2.0',
@@ -105,7 +104,6 @@ async function sendSereyHttpRpc(api, method, params = []) {
   return res.data ? res.data.result : null;
 }
 
-// সেরি বাংলা কমিউনিটিতে ব্রডকাস্ট ফাংশন
 async function postToSereyNative(title, body, permlink) {
   try {
     console.log('📡 সেরি ব্লকচেইন নোড থেকে বর্তমান ব্লক ডাটা সংগ্রহ করা হচ্ছে...');
@@ -115,35 +113,31 @@ async function postToSereyNative(title, body, permlink) {
     const headBlockNumber = dgp.head_block_number;
     const headBlockId = dgp.head_block_id;
 
-    // TaPoS ব্লকচেইন হিসাব
     const refBlockNum = headBlockNumber & 0xffff;
     const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
 
-    // টাইমস্ট্যাম্প
     const blockTime = new Date(dgp.time + 'Z').getTime();
     const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
 
-    // পোস্টের মূল ছবিগুলো (থাম্বনেইল হিসেবে ব্যবহারের জন্য)
+    // থাম্বনেইল হিসেবে পোস্টের ছবি নির্বাচন
     const images = extractImagesFromBody(body);
 
-    // মেটাডাটা তৈরি (যা ফ্রন্টএন্ডে ইমেজ ও ট্যাগ দেখানোর জন্য জরুরি)
     const metadata = {
       tags: ['bengali-community', 'blurt', 'blog'],
-      image: images.slice(0, 5), // থাম্বনেইল হিসেবে প্রথম ছবিগুলো
+      image: images.slice(0, 5),
       app: 'serey/2.0',
       format: 'markdown'
     };
 
-    // কমেন্ট অপারেশন (মূল পোস্ট তৈরি)
     const commentOp = [
       'comment',
       {
         parent_author: '',
-        parent_permlink: 'bengali-community', // বাংলা কমিউনিটি
-        author: SEREY_USER,                   // raihan123
+        parent_permlink: 'bengali-community',
+        author: SEREY_USER,
         permlink: permlink,
         title: title,
-        body: body,                           // নিখুঁত মার্কডাউন ফরম্যাট
+        body: body,
         json_metadata: JSON.stringify(metadata),
       },
     ];
@@ -170,7 +164,6 @@ async function postToSereyNative(title, body, permlink) {
       console.log(`🎉 ব্রডকাস্ট সম্পন্ন:`, JSON.stringify(res2));
     }
 
-    // সেরি ফ্রন্টএন্ড ক্যাশ রিফ্রেশ পিং
     try {
       await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
     } catch (e) {}
@@ -182,7 +175,6 @@ async function postToSereyNative(title, body, permlink) {
   }
 }
 
-// মূল এক্সিকিউশন
 async function main() {
   console.log('🤖 বট চালু হচ্ছে...');
   if (!SEREY_POSTING_KEY) {
@@ -227,7 +219,6 @@ async function main() {
   const title = postInfo.title;
   const body = postInfo.body;
 
-  // ইউনিক পার্মালিঙ্ক তৈরি
   const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const sereyPermlink = `${cleanTitle.slice(0, 35)}-${Date.now().toString(36)}`;
 
