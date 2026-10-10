@@ -1,31 +1,5 @@
-name: Blurt to Serey Auto Post
-
-on:
-  schedule:
-    - cron: '0 */6 * * *' # প্রতি ৬ ঘণ্টা পর পর
-  workflow_dispatch:
-
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      # Puppeteer এর জন্য ক্রোমিয়াম ব্রাউজার ইনস্টল
-      - name: Install Dependencies
+- name: Install Dependencies
         run: |
-          npm install
+          npm init -y
+          npm install axios sereyjs puppeteer
           npx puppeteer browsers install chrome
-
-      - name: Run Auto Poster
-        env:
-          SEREY_USERNAME: ${{ secrets.SEREY_USERNAME }}
-          SEREY_PASSWORD: ${{ secrets.SEREY_PASSWORD }}
-        run: node index.js
