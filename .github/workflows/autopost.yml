@@ -2,8 +2,8 @@ name: Blurt to Serey Auto Post
 
 on:
   schedule:
-    # প্রতিদিন বাংলাদেশ সময় সকাল ১০:০০ টায় স্বয়ংক্রিয়ভাবে রান হবে (UTC 04:00)
-    - cron: '0 4 * * *'
+    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় স্বয়ংক্রিয়ভাবে রান হবে (UTC 04:00 & 16:00)
+    - cron: '0 4,16 * * *'
   workflow_dispatch:
 
 permissions:
