@@ -2,7 +2,7 @@ name: Blurt to Serey Auto Post
 
 on:
   schedule:
-    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় রান হবে (UTC 04:00 & 16:00)
+    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় স্বয়ংক্রিয়ভাবে রান হবে (UTC 04:00 & 16:00)
     - cron: '0 4,16 * * *'
   workflow_dispatch:
 
@@ -18,19 +18,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.10'
+          node-version: '18'
 
       - name: Install dependencies
-        run: pip install requests
+        run: npm install sereyjs axios ws
 
       - name: Run Auto Poster
         env:
           SEREY_POSTING_KEY: ${{ secrets.SEREY_POSTING_KEY }}
           SEREY_USERNAME: raihan123
-        run: python main.py
+        run: node index.js
 
       - name: Save Queue and Log State
         run: |
