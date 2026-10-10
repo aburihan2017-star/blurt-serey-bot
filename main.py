@@ -20,8 +20,8 @@ BLURT_NODES = [
 ]
 
 DATA_FILE = "automation_data.json"
-MAX_DAILY_POSTS = 2       # দিনে সর্বোচ্চ ২টি পোস্ট
-DAY_IN_SECONDS = 72000    # ২০ ঘণ্টা উইন্ডো (সকাল ও রাতের পোস্ট নিশ্চিত করার জন্য)
+MAX_DAILY_POSTS = 2
+DAY_IN_SECONDS = 72000
 
 BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -99,32 +99,38 @@ def get_serey_auth():
                 if token:
                     print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
                     return token
-                print("লগইন হয়েছে কিন্তু টোকেন পাওয়া যায়নি:", data)
             else:
                 print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
         except requests.exceptions.Timeout:
             time.sleep(5)
         except Exception as e:
-            print(f"লগইন এরর: {e}")
             time.sleep(3)
     return None
 
 
-def clear_stuck_drafts(headers):
-    list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
-    try:
-        lr = requests.get(list_url, headers=headers, timeout=20)
-        if lr.status_code == 200:
-            draft_list = lr.json().get("draft_posts", [])
-            if draft_list:
+def deep_clean_all_drafts(headers):
+    """আটকে থাকা ড্রাফট ২৫ সহ সব পুরনো ড্রাফট সম্পূর্ণ মুছে সার্ভার পরিষ্কার করা"""
+    print("🧹 সার্ভারে আটকে থাকা সব ড্রাফট খুঁজে মুছে ফেলা হচ্ছে...")
+    while True:
+        try:
+            list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user?limit=50"
+            lr = requests.get(list_url, headers=headers, timeout=20)
+            if lr.status_code == 200:
+                draft_list = lr.json().get("draft_posts", [])
+                if not draft_list:
+                    print("✅ সার্ভার সম্পূর্ণ পরিষ্কার! কোনো পুরনো বা আটকে থাকা ড্রাফট নেই।")
+                    break
+                print(f"মুছে ফেলা হচ্ছে {len(draft_list)}টি পুরনো ড্রাফট...")
                 for d in draft_list:
                     d_id = d.get("id") or d.get("_id")
                     if d_id:
                         del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
-                        requests.delete(del_url, headers=headers, timeout=15)
-                time.sleep(2)
-    except Exception:
-        pass
+                        requests.delete(del_url, headers=headers, timeout=10)
+                time.sleep(1)
+            else:
+                break
+        except Exception:
+            break
 
 
 def post_to_serey_verified(token, title, body, tags=None):
@@ -138,9 +144,9 @@ def post_to_serey_verified(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    clear_stuck_drafts(headers)
+    # ধাপ ০: সব পুরনো ড্রাফট মুছে ইন-প্রোগ্রেস লক দূর করা
+    deep_clean_all_drafts(headers)
 
-    # HTML ফরম্যাটিং
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
@@ -169,12 +175,12 @@ def post_to_serey_verified(token, title, body, tags=None):
     }
 
     try:
-        print("ধাপ ১: নতুন ড্রাফট তৈরি করা হচ্ছে...")
+        print("ধাপ ১: ফ্রেশ ড্রাফট তৈরি করা হচ্ছে...")
         r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
         print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
         if r.status_code in [200, 201]:
-            print("✅ ড্রাফট সফলভাবে তৈরি হয়েছে!")
+            print("✅ ফ্রেশ ড্রাফট সফলভাবে তৈরি হয়েছে!")
             time.sleep(3)
 
             list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user"
@@ -184,22 +190,24 @@ def post_to_serey_verified(token, title, body, tags=None):
             if lr.status_code == 200:
                 draft_list = lr.json().get("draft_posts") or []
                 if draft_list:
-                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0)), reverse=True)
-                    draft_id = str(sorted_drafts[0].get("id"))
+                    draft_id = str(draft_list[0].get("id"))
 
             if not draft_id:
                 print("❌ ড্রাফট আইডি পাওয়া যায়নি।")
                 return False
 
-            print(f"ধাপ ২: ড্রাফট আইডি {draft_id} দিয়ে লাইভ পাবলিশ করা হচ্ছে...")
+            print(f"ধাপ ২: নতুন ড্রাফট আইডি {draft_id} দিয়ে লাইভ পাবলিশ করা হচ্ছে...")
             publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
             
+            # রান #৪৩ এর প্রমাণিত কল
             pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
             print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
 
             if pr.status_code in [200, 201]:
                 print(f"🎉🎉 পোস্ট সফলভাবে বাংলা কমিউনিটিতে লাইভ পাবলিশ হয়েছে: {title}")
                 return True
+            else:
+                print(f"❌ পাবলিশ রেসপন্স এরর: {pr.text}")
         else:
             print(f"ড্রাফট তৈরিতে ব্যর্থ: {r.text}")
     except Exception as e:
@@ -221,7 +229,6 @@ def main():
 
     data = load_data()
 
-    # দৈনিক ২টি পোস্টের সীমা চেক (২০ ঘণ্টার রোলিং উইন্ডো)
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -268,6 +275,7 @@ def main():
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
+        # সফল না হলে কিউয়ের শেষে পাঠানো
         data["queue"].append(permlink_to_post)
 
     save_data(data)
