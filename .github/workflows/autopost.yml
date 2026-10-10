@@ -2,41 +2,30 @@ name: Blurt to Serey Auto Post
 
 on:
   schedule:
-    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় স্বয়ংক্রিয়ভাবে রান হবে (UTC 04:00 & 16:00)
-    - cron: '0 4,16 * * *'
+    - cron: '0 */6 * * *' # প্রতি ৬ ঘণ্টা পর পর
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: 20
 
-      - name: Install dependencies
-        run: npm install sereyjs axios
+      # Puppeteer এর জন্য ক্রোমিয়াম ব্রাউজার ইনস্টল
+      - name: Install Dependencies
+        run: |
+          npm install
+          npx puppeteer browsers install chrome
 
       - name: Run Auto Poster
         env:
-          SEREY_POSTING_KEY: ${{ secrets.SEREY_POSTING_KEY }}
-          SEREY_USERNAME: raihan123
+          SEREY_USERNAME: ${{ secrets.SEREY_USERNAME }}
+          SEREY_PASSWORD: ${{ secrets.SEREY_PASSWORD }}
         run: node index.js
-
-      - name: Save Queue and Log State
-        run: |
-          git config --global user.name "AutoBot"
-          git config --global user.email "bot@github.com"
-          git add automation_data.json || true
-          git commit -m "Update post queue and history [skip ci]" || exit 0
-          git pull --rebase origin main
-          git push origin main
