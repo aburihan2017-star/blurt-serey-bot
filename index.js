@@ -174,3 +174,92 @@ async function postToSereyNative(title, body, permlink, tags) {
     try {
       await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
     } catch (e) {
+      // ব্যাকআপ ব্রডকাস্ট
+      await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction', [signedTx]);
+    }
+
+    console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে!`);
+
+    // সেরি ওয়েবসাইট ক্যাশ রিফ্রেশ
+    try {
+      await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
+    } catch (e) {}
+
+    return true;
+  } catch (err) {
+    console.error('❌ ব্রডকাস্ট এরর:', err.message);
+    return false;
+  }
+}
+
+async function main() {
+  console.log('বট চালু হচ্ছে...');
+  if (!SEREY_POSTING_KEY) {
+    console.error('ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!');
+    return;
+  }
+
+  const data = loadData();
+  const now = Date.now();
+
+  data.timestamps = (data.timestamps || []).filter(t => now - t < DAY_IN_MS);
+  if (data.timestamps.length >= MAX_DAILY_POSTS) {
+    console.log(`আজকের দৈনিক সীমা (${MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।`);
+    return;
+  }
+
+  const postedSet = new Set(data.posted || []);
+
+  if (!data.queue || data.queue.length === 0) {
+    console.log('ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...');
+    const fetched = await fetchOneYearOldPosts(postedSet);
+    data.queue = fetched;
+    saveData(data);
+  }
+
+  if (!data.queue || data.queue.length === 0) {
+    console.log('পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।');
+    return;
+  }
+
+  const permlinkToPost = data.queue.shift();
+  const postInfo = await getPostDetails(permlinkToPost);
+
+  if (!postInfo || !postInfo.title) {
+    console.log(`পোস্ট ডাটা পাওয়া যায়নি, স্কিপ: ${permlinkToPost}`);
+    data.posted = data.posted || [];
+    data.posted.push(permlinkToPost);
+    saveData(data);
+    return;
+  }
+
+  const title = postInfo.title;
+  const body = postInfo.body;
+
+  let tags = [];
+  try {
+    const meta = JSON.parse(postInfo.json_metadata || '{}');
+    if (meta.tags && Array.isArray(meta.tags)) tags = meta.tags;
+  } catch (e) {}
+
+  const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
+
+  console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
+  const success = await postToSereyNative(title, body, sereyPermlink, tags);
+
+  if (success) {
+    data.posted = data.posted || [];
+    data.posted.push(permlinkToPost);
+    data.timestamps = data.timestamps || [];
+    data.timestamps.push(now);
+    console.log('ডাটা সেভ করা হয়েছে।');
+  } else {
+    data.queue.push(permlinkToPost);
+  }
+
+  saveData(data);
+  console.log('\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।');
+}
+
+main();
