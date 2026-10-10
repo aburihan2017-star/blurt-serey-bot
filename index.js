@@ -75,7 +75,7 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-// সেরি নোডে সরাসরি প্রমাণিত HTTP RPC কল (কনসোলের সফল কল অনুসারে)
+// সেরি নোডে প্রমাণিত HTTP RPC কল
 async function sendSereyHttpRpc(api, method, params = []) {
   const payload = {
     jsonrpc: '2.0',
@@ -98,12 +98,11 @@ async function sendSereyHttpRpc(api, method, params = []) {
   return res.data ? res.data.result : null;
 }
 
-// সেরি ব্লকচেইনে সরাসরি সাইন ও ব্রডকাস্ট ফাংশন
-async function postToSereyNative(title, body, permlink, tags) {
+// সেরি বাংলা কমিউনিটিতে সরাসরি ব্রডকাস্ট
+async function postToSereyNative(title, body, permlink) {
   try {
     console.log('📡 সেরি ব্লকচেইন নোড থেকে বর্তমান ব্লক ডাটা সংগ্রহ করা হচ্ছে...');
 
-    // ১. প্রমাণিত আরপিসি দিয়ে ব্লক ডাটা আনা
     const dgp = await sendSereyHttpRpc('database_api', 'get_dynamic_global_properties', []);
     
     const headBlockNumber = dgp.head_block_number;
@@ -117,42 +116,23 @@ async function postToSereyNative(title, body, permlink, tags) {
     const blockTime = new Date(dgp.time + 'Z').getTime();
     const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
 
-    // ট্যাগ ও মেটাডাটা
-    const finalTags = ['news', 'others', 'bengali-community'];
-    if (tags && Array.isArray(tags)) {
-      tags.forEach(t => {
-        const clean = String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '');
-        if (clean && !finalTags.includes(clean)) finalTags.push(clean);
-      });
-    }
-
+    // HTML ফরম্যাটিং
     let formattedBody = body;
     if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
       formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
     }
 
-    const jsonMetadata = JSON.stringify({
-      tags: finalTags,
-      categories: ['news', 'others'],
-      community_id: 2,
-      community_title: 'Bengali Community',
-      type: 1,
-      post_to_blockchain: true,
-      app: 'serey/0.1',
-      format: 'html',
-    });
-
-    // ২. অপারেশন অবজেক্ট তৈরি
+    // কনসোলে পাওয়া সফল টেস্ট পোস্টের হুবহু প্যারামিটার
     const op = [
       'comment',
       {
         parent_author: '',
-        parent_permlink: 'news',
+        parent_permlink: 'bengali-community', // লাইভ প্রমাণিত আসল ক্যাটাগরি!
         author: SEREY_USER,
         permlink: permlink,
         title: title,
         body: formattedBody,
-        json_metadata: jsonMetadata,
+        json_metadata: '',                  // লাইভ প্রমাণিত আসল মেটাডাটা!
       },
     ];
 
@@ -164,21 +144,19 @@ async function postToSereyNative(title, body, permlink, tags) {
       extensions: [],
     };
 
-    // ৩. পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা
     console.log(`🔑 ট্রানজাকশন সাইন করা হচ্ছে...`);
     const signedTx = serey.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
 
-    console.log(`🚀 ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
+    console.log(`🚀 সেরি বাংলা কমিউনিটিতে ব্রডকাস্ট করা হচ্ছে: ${title}`);
+    console.log(`📌 Permlink: ${permlink}`);
 
-    // ৪. সরাসরি HTTP RPC দিয়ে ব্রডকাস্ট পাঠানো
     try {
-      await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
+      const res = await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
+      console.log(`🎉🎉 সিনক্রোনাস ব্রডকাস্ট সফল:`, JSON.stringify(res));
     } catch (e) {
-      // ব্যাকআপ ব্রডকাস্ট
-      await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction', [signedTx]);
+      const res2 = await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction', [signedTx]);
+      console.log(`🎉 ব্রডকাস্ট সম্পন্ন:`, JSON.stringify(res2));
     }
-
-    console.log(`🎉🎉 পোস্ট সফলভাবে সেরি ব্লকচেইনে লাইভ হয়েছে!`);
 
     // সেরি ওয়েবসাইট ক্যাশ রিফ্রেশ
     try {
@@ -236,17 +214,12 @@ async function main() {
   const title = postInfo.title;
   const body = postInfo.body;
 
-  let tags = [];
-  try {
-    const meta = JSON.parse(postInfo.json_metadata || '{}');
-    if (meta.tags && Array.isArray(meta.tags)) tags = meta.tags;
-  } catch (e) {}
-
+  // ইউনিক পারমালিঙ্ক তৈরি
   const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
 
   console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
-  const success = await postToSereyNative(title, body, sereyPermlink, tags);
+  const success = await postToSereyNative(title, body, sereyPermlink);
 
   if (success) {
     data.posted = data.posted || [];
