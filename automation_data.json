@@ -10,10 +10,10 @@
   "type": 1,
   "post_to_blockchain": true,
   "timestamps": [
-    1791561142098
+    1791561142098,
+    1791643054439
   ],
   "queue": [
-    "line-blues",
     "gbtyl-hairy-croton",
     "the-most-interesting-card-the-guild-pack",
     "runic-skychonk",
@@ -114,6 +114,7 @@
     "gold-iii-passed-a-great-part-of-my-gaming-life"
   ],
   "posted": [
-    "61bxre-splinterlands-ranked-battle-report-another-memorable-victory-in-gold-ii-with-great-strategy"
+    "61bxre-splinterlands-ranked-battle-report-another-memorable-victory-in-gold-ii-with-great-strategy",
+    "line-blues"
   ]
 }
