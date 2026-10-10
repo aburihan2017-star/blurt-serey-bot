@@ -108,32 +108,24 @@ def get_serey_auth():
     return None
 
 
-def deep_clean_all_drafts(headers):
-    """আটকে থাকা ড্রাফট ২৫ সহ সব পুরনো ড্রাফট সম্পূর্ণ মুছে সার্ভার পরিষ্কার করা"""
-    print("🧹 সার্ভারে আটকে থাকা সব ড্রাফট খুঁজে মুছে ফেলা হচ্ছে...")
-    while True:
-        try:
-            list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user?limit=50"
-            lr = requests.get(list_url, headers=headers, timeout=20)
-            if lr.status_code == 200:
-                draft_list = lr.json().get("draft_posts", [])
-                if not draft_list:
-                    print("✅ সার্ভার সম্পূর্ণ পরিষ্কার! কোনো পুরনো বা আটকে থাকা ড্রাফট নেই।")
-                    break
-                print(f"মুছে ফেলা হচ্ছে {len(draft_list)}টি পুরনো ড্রাফট...")
-                for d in draft_list:
-                    d_id = d.get("id") or d.get("_id")
-                    if d_id:
-                        del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
-                        requests.delete(del_url, headers=headers, timeout=10)
-                time.sleep(1)
-            else:
-                break
-        except Exception:
-            break
+def clear_stuck_drafts(headers):
+    """আটকে থাকা ড্রাফট মুছে সার্ভার ক্লিয়ার করা"""
+    try:
+        list_url = "https://global-api.serey.io/api/v2/draft-post/list-by-current-user?limit=50"
+        lr = requests.get(list_url, headers=headers, timeout=20)
+        if lr.status_code == 200:
+            draft_list = lr.json().get("draft_posts", [])
+            for d in draft_list:
+                d_id = d.get("id") or d.get("_id")
+                if d_id:
+                    del_url = f"https://global-api.serey.io/api/v2/draft-post/delete-by-id/{d_id}"
+                    requests.delete(del_url, headers=headers, timeout=10)
+            time.sleep(2)
+    except Exception:
+        pass
 
 
-def post_to_serey_verified(token, title, body, tags=None):
+def post_to_serey_perfect(token, title, body, tags=None):
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
@@ -144,9 +136,9 @@ def post_to_serey_verified(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
-    # ধাপ ০: সব পুরনো ড্রাফট মুছে ইন-প্রোগ্রেস লক দূর করা
-    deep_clean_all_drafts(headers)
+    clear_stuck_drafts(headers)
 
+    # HTML ফরম্যাটিং
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
@@ -154,15 +146,22 @@ def post_to_serey_verified(token, title, body, tags=None):
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:35]
     unique_permlink = f"{slug}-{int(time.time())}"
 
+    # ব্রাউজারের SAVE_POST কোড থেকে সরাসরি প্রাপ্ত নিখুঁত কাঠামো
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
     draft_payload = {
         "title": title,
-        "community": COMMUNITY_NAME,
+        "desc": formatted_body,
+        "body": formatted_body,
+        "permlink": unique_permlink,
         "community_id": COMMUNITY_ID,
+        "community_title": COMMUNITY_NAME,
+        "post_to_blockchain": True,
         "tags": final_tags,
+        "type": 1,
         "posts": [
             {
                 "title": title,
+                "desc": formatted_body,
                 "body": formatted_body,
                 "posts": formatted_body,
                 "permlink": unique_permlink,
@@ -170,12 +169,13 @@ def post_to_serey_verified(token, title, body, tags=None):
                 "categories": "news",
                 "community": COMMUNITY_NAME,
                 "community_id": COMMUNITY_ID,
+                "post_to_blockchain": True,
             }
         ],
     }
 
     try:
-        print("ধাপ ১: ফ্রেশ ড্রাফট তৈরি করা হচ্ছে...")
+        print("ধাপ ১: ব্রাউজার ফরম্যাটে ফ্রেশ ড্রাফট তৈরি করা হচ্ছে...")
         r = requests.post(draft_url, json=draft_payload, headers=headers, timeout=35)
         print(f"ড্রাফট রেসপন্স ({r.status_code}): {r.text}")
 
@@ -190,16 +190,17 @@ def post_to_serey_verified(token, title, body, tags=None):
             if lr.status_code == 200:
                 draft_list = lr.json().get("draft_posts") or []
                 if draft_list:
-                    draft_id = str(draft_list[0].get("id"))
+                    sorted_drafts = sorted(draft_list, key=lambda x: int(x.get("id", 0)), reverse=True)
+                    draft_id = str(sorted_drafts[0].get("id"))
 
             if not draft_id:
-                print("❌ ড্রাফট আইডি পাওয়া যায়নি।")
+                print("❌ ড্রাফট আইডি মেলেনি।")
                 return False
 
-            print(f"ধাপ ২: নতুন ড্রাফট আইডি {draft_id} দিয়ে লাইভ পাবলিশ করা হচ্ছে...")
+            print(f"ধাপ ২: ড্রাফট আইডি {draft_id} দিয়ে লাইভ পাবলিশ করা হচ্ছে...")
             publish_url = f"https://global-api.serey.io/api/v2/draft-post/publish-by-id/{draft_id}"
             
-            # রান #৪৩ এর প্রমাণিত কল
+            # ব্রাউজারের কল
             pr = requests.post(publish_url, json={}, headers=headers, timeout=35)
             print(f"পাবলিশ রেসপন্স ({pr.status_code}): {pr.text}")
 
@@ -268,14 +269,13 @@ def main():
         pass
 
     print(f"\nপ্রসেস করা হচ্ছে: {title}")
-    success = post_to_serey_verified(token, title, body, tags)
+    success = post_to_serey_perfect(token, title, body, tags)
 
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।")
     else:
-        # সফল না হলে কিউয়ের শেষে পাঠানো
         data["queue"].append(permlink_to_post)
 
     save_data(data)
