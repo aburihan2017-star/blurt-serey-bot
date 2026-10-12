@@ -5,7 +5,7 @@ const serey = require('sereyjs');
 // কনফিগারেশন
 const BLURT_USER = 'aburihan1';
 const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123';
-const SEREY_INPUT_KEY = process.env.SEREY_POSTING_KEY;
+const SEREY_POSTING_KEY = (process.env.SEREY_POSTING_KEY || '').trim();
 
 const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
@@ -13,9 +13,8 @@ const DAY_IN_MS = 86400 * 1000;
 
 const SEREY_CHAIN_ID = '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324';
 const SEREY_PREFIX = 'SRY';
-const EXPECTED_PUBKEY = 'SRY61TzHEhxcsnD2DL7F6VQR12xmRbcwaPcW1DgqvsTxwadcGkdco';
 
-// সেরি চেইন কনফিগ
+// সেরি চেইন কনফিগ সেট
 serey.config.set('address_prefix', SEREY_PREFIX);
 serey.config.set('chain_id', SEREY_CHAIN_ID);
 
@@ -99,49 +98,20 @@ async function sendSereyHttpRpc(api, method, params = []) {
   return res.data ? res.data.result : null;
 }
 
-// পোস্টিং প্রাইভেট কি নিশ্চিত করার ফাংশন (WIF বনাম পাসওয়ার্ড অটো-ডিটেক্ট)
-function getValidPostingWif() {
-  let key = SEREY_INPUT_KEY.trim();
-  try {
-    const pub = serey.auth.wifToPublic(key);
-    console.log(`🔑 ডিরেক্ট প্রাইভেট কি ভ্যালিডেশন সফল! পাবলিক কি: ${pub}`);
-    if (pub === EXPECTED_PUBKEY) {
-      console.log('✅ পাবলিক কি ব্লকচেইনের অনুমোদিত কি-এর সাথে ১০০% মিলেছে!');
-      return key;
-    }
-  } catch (e) {}
-
-  // যদি সরাসরি কি না হয়, পাসওয়ার্ড থেকে পোস্টিং কি তৈরি করা
-  try {
-    console.log('🔄 ইনপুটটিকে পাসওয়ার্ড হিসেবে গণ্য করে আসল পোস্টিং কি তৈরি করা হচ্ছে...');
-    const derivedWif = serey.auth.toWif(SEREY_USER, key, 'posting');
-    const derivedPub = serey.auth.wifToPublic(derivedWif);
-    console.log(`🔑 উৎপাদিত পাবলিক কি: ${derivedPub}`);
-    if (derivedPub === EXPECTED_PUBKEY) {
-      console.log('✅ অভিনন্দন! পাসওয়ার্ড থেকে সঠিক পোস্টিং কি পাওয়া গেছে!');
-      return derivedWif;
-    }
-    return derivedWif;
-  } catch (err) {
-    console.error('পোস্টিং কি জেনারেশন এরর:', err);
-    return key;
-  }
-}
-
 // সেরি বাংলা কমিউনিটিতে সরাসরি ব্রডকাস্ট
 async function postToSereyNative(title, body, permlink) {
   try {
-    const validWif = getValidPostingWif();
-
     console.log('📡 সেরি ব্লকচেইন নোড থেকে বর্তমান ব্লক ডাটা সংগ্রহ করা হচ্ছে...');
     const dgp = await sendSereyHttpRpc('database_api', 'get_dynamic_global_properties', []);
     
     const headBlockNumber = dgp.head_block_number;
     const headBlockId = dgp.head_block_id;
 
+    // TaPoS হিসাব
     const refBlockNum = headBlockNumber & 0xffff;
     const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
 
+    // টাইমস্ট্যাম্প
     const blockTime = new Date(dgp.time + 'Z').getTime();
     const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
 
@@ -173,14 +143,15 @@ async function postToSereyNative(title, body, permlink) {
       extensions: [],
     };
 
-    console.log(`🔑 অনুমোদিত পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা হচ্ছে...`);
-    const signedTx = serey.auth.signTransaction(tx, [validWif]);
+    // আপনার আসল অনুমোদিত পোস্টিং কি দিয়ে সরাসরি সাইন করা
+    console.log(`🔑 আসল অনুমোদিত পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা হচ্ছে...`);
+    const signedTx = serey.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
 
     console.log(`🚀 সেরি বাংলা কমিউনিটিতে ব্রডকাস্ট করা হচ্ছে: ${title}`);
     console.log(`📌 পারমালিঙ্ক: ${permlink}`);
 
     const res = await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
-    console.log(`🎉🎉 সিনক্রোনাস ব্রডকাস্ট চূড়ান্ত সফল:`, JSON.stringify(res));
+    console.log(`🎉🎉 পোস্ট সফলভাবে ব্লকচেইনে লাইভ হয়েছে:`, JSON.stringify(res));
 
     // ক্যাশ সিঙ্ক
     try {
@@ -196,7 +167,7 @@ async function postToSereyNative(title, body, permlink) {
 
 async function main() {
   console.log('বট চালু হচ্ছে...');
-  if (!SEREY_INPUT_KEY) {
+  if (!SEREY_POSTING_KEY) {
     console.error('ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!');
     return;
   }
@@ -238,7 +209,7 @@ async function main() {
   const title = postInfo.title;
   const body = postInfo.body;
 
-  // পরিষ্কার ও ইউনিক পারমালিঙ্ক
+  // ইউনিক পারমালিঙ্ক তৈরি
   const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
 
