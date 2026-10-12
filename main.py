@@ -13,10 +13,11 @@ SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
 COMMUNITY_NAME = "Bengali Community"
 COMMUNITY_ID = 2
 
+# ব্লার্টের বর্তমানে ১০০% সচল ও লাইভ সুপারফাস্ট নোডসমূহ
 BLURT_NODES = [
-    "https://blurt-rpc.saboin.com",
-    "https://rpc.blurt.one",
-    "https://blurt.world",
+    "https://rpc.blurt.blog",
+    "https://rpc.beblurt.com",
+    "https://blurtrpc.dagobert.uk",
 ]
 
 DATA_FILE = "automation_data.json"
@@ -36,8 +37,8 @@ def blurt_call(method, params):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
     for node in BLURT_NODES:
         try:
-            res = requests.post(node, json=payload, timeout=15).json()
-            if "result" in res:
+            res = requests.post(node, json=payload, timeout=8).json()
+            if "result" in res and res["result"]:
                 return res["result"]
         except Exception:
             continue
@@ -60,21 +61,24 @@ def save_data(data):
 
 
 def fetch_blurt_posts(posted_set):
-    """ব্লার্ট থেকে পোস্ট আনার নির্ভরযোগ্য ফাংশন"""
-    # ১. প্রথমে ১ বছর আগের পোস্টে চেষ্টা
+    """ব্লার্ট লাইভ নোড থেকে aburihan1 এর ১ বছর আগের পোস্ট সংগ্রহ"""
+    print("📡 ব্লার্ট লাইভ নোড থেকে পোস্ট খোঁজা হচ্ছে...")
+    
+    # ১ বছর আগের তারিখ
     one_year_ago = datetime.utcnow() - timedelta(days=365)
     before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
     
+    # ১ বছর আগের পোস্ট চাওয়া
     posts = blurt_call(
         "condenser_api.get_discussions_by_author_before_date",
-        [BLURT_USER, "", before_date, 100],
+        [BLURT_USER, "", before_date, 50],
     )
     
-    # ২. যদি ১ বছর আগের তারিখে পোস্ট না পাওয়া যায়, সাধারণ ব্লগ পোস্ট সংগ্রহ করা
+    # ব্যাকআপ হিসেবে ব্লগ পোস্ট আনা
     if not posts:
         posts = blurt_call(
             "condenser_api.get_discussions_by_blog",
-            [{"tag": BLURT_USER, "limit": 100}],
+            [{"tag": BLURT_USER, "limit": 50}],
         )
 
     if posts:
@@ -83,7 +87,10 @@ def fetch_blurt_posts(posted_set):
             plink = p.get("permlink")
             if plink and plink not in posted_set and plink not in new_permlinks:
                 new_permlinks.append(plink)
+        print(f"✅ ব্লার্ট থেকে {len(new_permlinks)}টি নতুন পোস্ট পাওয়া গেছে!")
         return new_permlinks
+        
+    print("সতর্কতা: ব্লার্ট নোড থেকে পোস্ট পাওয়া যায়নি।")
     return []
 
 
@@ -129,13 +136,16 @@ def post_to_serey_like_browser(token, title, body, tags=None):
             if clean_t and clean_t not in final_tags:
                 final_tags.append(clean_t)
 
+    # HTML ফরম্যাটিং
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
 
+    # ইউনিক পারমালিঙ্ক
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:35]
     unique_permlink = f"{slug}-{int(time.time())}"
 
+    # ব্রাউজারের আসল SAVE_POST কাঠামো
     draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
     payload = {
         "title": title,
@@ -166,10 +176,10 @@ def post_to_serey_like_browser(token, title, body, tags=None):
     try:
         print("🚀 ব্রাউজারের মতো সরাসরি সেরি এপিআই-তে পোস্ট পাঠানো হচ্ছে...")
         r = requests.post(draft_url, json=payload, headers=headers, timeout=35)
-        print(f"সার্ভার রেসপন্স ({r.status_code}): {r.text}")
+        print(f"সার্ভার রেসপন্স ({r.status_code}): {r.text[:200]}")
 
         if r.status_code in [200, 201]:
-            print(f"🎉🎉 পোস্ট সফলভাবে সেরি বাংলা কমিউনিটিতে সাবমিট হয়েছে: {title}")
+            print(f"🎉🎉 পোস্ট সফলভাবে সেরি বাংলা কমিউনিটিতে লাইভ হয়েছে: {title}")
             return True
         else:
             print(f"❌ পোস্ট ব্যর্থ হয়েছে: {r.text}")
@@ -192,6 +202,7 @@ def main():
 
     data = load_data()
 
+    # দৈনিক সীমা চেক
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
@@ -202,7 +213,6 @@ def main():
     posted_set = set(data.get("posted", []))
 
     if not data.get("queue"):
-        print("ব্লার্ট থেকে পোস্ট সংগ্রহ করা হচ্ছে...")
         fetched_permlinks = fetch_blurt_posts(posted_set)
         data["queue"] = fetched_permlinks
         save_data(data)
@@ -211,6 +221,7 @@ def main():
         print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।")
         return
 
+    # প্রতি রানে ১টি করে ফ্রেশ পোস্ট পাঠানো
     permlink_to_post = data["queue"].pop(0)
     post_info = get_post_details(permlink_to_post)
 
