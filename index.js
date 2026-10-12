@@ -18,6 +18,14 @@ const SEREY_PREFIX = 'SRY';
 serey.config.set('address_prefix', SEREY_PREFIX);
 serey.config.set('chain_id', SEREY_CHAIN_ID);
 
+const BASE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Content-Type': 'application/json',
+  'Referer': 'https://bengali.serey.io/write/new',
+  'Origin': 'https://bengali.serey.io',
+};
+
 const BLURT_NODES = [
   'https://rpc.blurt.blog',
   'https://rpc.beblurt.com',
@@ -75,7 +83,20 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-// সেরি নোডে প্রমাণিত HTTP RPC কল
+// সেরি ওয়েব লগইন টোকেন আনা
+async function getSereyToken() {
+  try {
+    const loginUrl = 'https://global-api.serey.io/api/v2/auth/login';
+    const payload = { username: SEREY_USER, password: SEREY_POSTING_KEY };
+    const r = await axios.post(loginUrl, payload, { headers: BASE_HEADERS, timeout: 20000 });
+    const data = r.data;
+    return data.token || data.accessToken || data.data?.token || data.data?.accessToken;
+  } catch (err) {
+    return null;
+  }
+}
+
+// সেরি ব্লকচেইন নোডে প্রমাণিত HTTP RPC কল
 async function sendSereyHttpRpc(api, method, params = []) {
   const payload = {
     jsonrpc: '2.0',
@@ -87,7 +108,7 @@ async function sendSereyHttpRpc(api, method, params = []) {
   const res = await axios.post('https://api.serey.io', payload, {
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'User-Agent': BASE_HEADERS['User-Agent'],
     },
     timeout: 20000,
   });
@@ -98,30 +119,25 @@ async function sendSereyHttpRpc(api, method, params = []) {
   return res.data ? res.data.result : null;
 }
 
-// সেরি বাংলা কমিউনিটিতে সরাসরি ব্রডকাস্ট
-async function postToSereyNative(title, body, permlink) {
+// সেরি ব্লকচেইন ও ওয়েব ডাটাবেজে একই সাথে পোস্ট সম্পন্ন করা (ব্রাউজারের মতো অবিকল)
+async function postDualSerey(title, body, permlink) {
   try {
+    // ধাপ ১: ব্লকচেইনে সাইন ও ব্রডকাস্ট
     console.log('📡 সেরি ব্লকচেইন নোড থেকে বর্তমান ব্লক ডাটা সংগ্রহ করা হচ্ছে...');
     const dgp = await sendSereyHttpRpc('database_api', 'get_dynamic_global_properties', []);
     
     const headBlockNumber = dgp.head_block_number;
     const headBlockId = dgp.head_block_id;
-
-    // TaPoS হিসাব
     const refBlockNum = headBlockNumber & 0xffff;
     const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
-
-    // টাইমস্ট্যাম্প
     const blockTime = new Date(dgp.time + 'Z').getTime();
     const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
 
-    // HTML ফরম্যাটিং
     let formattedBody = body;
     if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
       formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
     }
 
-    // লাইভ টেস্ট পোস্ট থেকে হুবহু প্রমাণিত আসল প্যারামিটার
     const op = [
       'comment',
       {
@@ -143,17 +159,53 @@ async function postToSereyNative(title, body, permlink) {
       extensions: [],
     };
 
-    // আপনার আসল অনুমোদিত পোস্টিং কি দিয়ে সরাসরি সাইন করা
     console.log(`🔑 আসল অনুমোদিত পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা হচ্ছে...`);
     const signedTx = serey.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
 
-    console.log(`🚀 সেরি বাংলা কমিউনিটিতে ব্রডকাস্ট করা হচ্ছে: ${title}`);
-    console.log(`📌 পারমালিঙ্ক: ${permlink}`);
+    console.log(`🚀 ১. সেরি ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
+    await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
+    console.log(`🎉🎉 পোস্ট সরাসরি ব্লকচেইনে সফলভাবে রেকর্ড হয়েছে!`);
 
-    const res = await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
-    console.log(`🎉🎉 পোস্ট সফলভাবে ব্লকচেইনে লাইভ হয়েছে:`, JSON.stringify(res));
+    // ধাপ ২: সেরি ওয়েব ডাটাবেজে (MongoDB) রেজিস্টার করা (ব্রাউজারের h.lF ফাংশন অনুযায়ী)
+    console.log(`📝 ২. সেরি ওয়েব ডাটাবেজে পোস্ট রেজিস্টার করা হচ্ছে...`);
+    const token = await getSereyToken();
+    if (token) {
+      const headers = { ...BASE_HEADERS, Authorization: `Bearer ${token}` };
+      const webPayload = {
+        title: title,
+        desc: formattedBody,
+        body: formattedBody,
+        permlink: permlink,
+        community_id: 2,
+        community_title: 'Bengali Community',
+        post_to_blockchain: true,
+        tags: ['news', 'others', 'bengali-community'],
+        type: 1,
+        posts: [
+          {
+            title: title,
+            desc: formattedBody,
+            body: formattedBody,
+            posts: formattedBody,
+            permlink: permlink,
+            tags: ['news', 'others', 'bengali-community'],
+            categories: 'news',
+            community: 'Bengali Community',
+            community_id: 2,
+            post_to_blockchain: true,
+          }
+        ],
+      };
 
-    // ক্যাশ সিঙ্ক
+      try {
+        await axios.post('https://global-api.serey.io/api/v2/draft-post/create-or-update', webPayload, { headers, timeout: 20000 });
+        console.log(`✅ সেরি ওয়েব ডাটাবেজে পোস্ট সফলভাবে সিঙ্ক হয়েছে!`);
+      } catch (dbErr) {
+        console.log('ডাটাবেজ সিঙ্ক নোটিশ:', dbErr.message);
+      }
+    }
+
+    // ওয়েবসাইট ক্যাশ রিফ্রেশ
     try {
       await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
     } catch (e) {}
@@ -209,12 +261,12 @@ async function main() {
   const title = postInfo.title;
   const body = postInfo.body;
 
-  // ইউনিক পারমালিঙ্ক তৈরি
+  // পরিষ্কার ইউনিক পারমালিঙ্ক তৈরি
   const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
 
   console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
-  const success = await postToSereyNative(title, body, sereyPermlink);
+  const success = await postDualSerey(title, body, sereyPermlink);
 
   if (success) {
     data.posted = data.posted || [];
