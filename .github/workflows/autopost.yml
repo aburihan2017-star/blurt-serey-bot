@@ -2,41 +2,41 @@ name: Blurt to Serey Auto Post
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # প্রতি ৬ ঘণ্টা পর পর স্বয়ংক্রিয়ভাবে চলবে
-  workflow_dispatch:      # ম্যানুয়ালি রান করার বাটন
+    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় স্বয়ংক্রিয়ভাবে রান হবে (UTC 04:00 & 16:00)
+    - cron: '0 4,16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write     # automation_data.json সেভ করে পুশ করার অনুমতি
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          rm -f package.json package-lock.json
-          npm init -y
-          npm install axios sereyjs
+        run: pip install requests
 
       - name: Run Auto Poster
         env:
-          SEREY_USERNAME: ${{ secrets.SEREY_USERNAME }}
           SEREY_POSTING_KEY: ${{ secrets.SEREY_POSTING_KEY }}
-        run: node index.js
+          SEREY_USERNAME: raihan123
+        run: python main.py
 
       - name: Save Queue and Log State
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add automation_data.json
-          git commit -m "Update post queue and history [skip ci]" || echo "No changes to commit"
-          git push
+          git config --global user.name "AutoBot"
+          git config --global user.email "bot@github.com"
+          git add automation_data.json || true
+          git commit -m "Update post queue and history [skip ci]" || exit 0
+          git pull --rebase origin main
+          git push origin main
