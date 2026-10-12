@@ -13,7 +13,6 @@ SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
 COMMUNITY_NAME = "Bengali Community"
 COMMUNITY_ID = 2
 
-# ব্লার্টের বর্তমানে ১০০% সচল ও লাইভ সুপারফাস্ট নোডসমূহ
 BLURT_NODES = [
     "https://rpc.blurt.blog",
     "https://rpc.beblurt.com",
@@ -61,20 +60,15 @@ def save_data(data):
 
 
 def fetch_blurt_posts(posted_set):
-    """ব্লার্ট লাইভ নোড থেকে aburihan1 এর ১ বছর আগের পোস্ট সংগ্রহ"""
-    print("📡 ব্লার্ট লাইভ নোড থেকে পোস্ট খোঁজা হচ্ছে...")
-    
-    # ১ বছর আগের তারিখ
+    """ব্লার্ট থেকে ১ বছর আগের ফ্রেশ পোস্ট আনা"""
     one_year_ago = datetime.utcnow() - timedelta(days=365)
     before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
     
-    # ১ বছর আগের পোস্ট চাওয়া
     posts = blurt_call(
         "condenser_api.get_discussions_by_author_before_date",
         [BLURT_USER, "", before_date, 50],
     )
     
-    # ব্যাকআপ হিসেবে ব্লগ পোস্ট আনা
     if not posts:
         posts = blurt_call(
             "condenser_api.get_discussions_by_blog",
@@ -87,10 +81,7 @@ def fetch_blurt_posts(posted_set):
             plink = p.get("permlink")
             if plink and plink not in posted_set and plink not in new_permlinks:
                 new_permlinks.append(plink)
-        print(f"✅ ব্লার্ট থেকে {len(new_permlinks)}টি নতুন পোস্ট পাওয়া গেছে!")
         return new_permlinks
-        
-    print("সতর্কতা: ব্লার্ট নোড থেকে পোস্ট পাওয়া যায়নি।")
     return []
 
 
@@ -116,8 +107,6 @@ def get_serey_auth():
                 if token:
                     print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
                     return token
-            else:
-                print(f"লগইন রেসপন্স: {r.status_code} - {r.text}")
         except requests.exceptions.Timeout:
             time.sleep(5)
         except Exception as e:
@@ -125,7 +114,8 @@ def get_serey_auth():
     return None
 
 
-def post_to_serey_like_browser(token, title, body, tags=None):
+def post_to_serey_native_browser(token, title, body, tags=None):
+    """ব্রাউজার সোর্স কোডের হুবহু s অবজেক্ট দিয়ে পোস্ট সম্পন্ন করা"""
     headers = dict(BASE_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
 
@@ -145,46 +135,62 @@ def post_to_serey_like_browser(token, title, body, tags=None):
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:35]
     unique_permlink = f"{slug}-{int(time.time())}"
 
-    # ব্রাউজারের আসল SAVE_POST কাঠামো
-    draft_url = "https://global-api.serey.io/api/v2/draft-post/create-or-update"
-    payload = {
+    # ব্রাউজার সোর্স কোড থেকে হুবহু প্রাপ্ত অবজেক্ট s
+    payload_form = {
+        "author": SEREY_USER,
+        "permlink": unique_permlink,
+        "title": title,
+        "desc": formatted_body,
+        "body": formatted_body,
+        "categories": "news",
+        "subcategories": [],
+        "community_id": COMMUNITY_ID,
+        "community_title": COMMUNITY_NAME,
+        "post_to_blockchain": True,
+        "tags": final_tags,
+        "images": [],
+        "videos": [],
+        "forever": None,
+        "site_credit": '<p>This was posted using <a href="https://serey.io" rel="nofollow noopener">Serey.io</a> cross platform posting.</p>',
+    }
+
+    # সোর্স কোডের দুটি মূল পাথ
+    target_urls = [
+        "https://global-api.serey.io/api/v2/draft-post/create-or-update",
+        "https://global-api.serey.io/api/v2/landing-page-v2/create-or-update",
+    ]
+
+    for url in target_urls:
+        try:
+            print(f"🚀 ব্রাউজার কাঠামো অনুযায়ী সরাসরি পাঠানো হচ্ছে: {url}")
+            r = requests.post(url, json=payload_form, headers=headers, timeout=35)
+            print(f"সার্ভার রেসপন্স ({r.status_code}): {r.text[:250]}")
+
+            if r.status_code in [200, 201]:
+                res_data = r.json()
+                if res_data.get("status") is True or "Success" in str(res_data):
+                    print(f"🎉🎉 পোস্ট সফলভাবে সেরি বাংলা কমিউনিটিতে লাইভ হয়েছে: {title}")
+                    return True
+        except Exception as e:
+            print(f"এরর ({url}): {e}")
+
+    # ব্যাকআপ স্ট্রাকচার (posts অ্যারে সহ)
+    payload_backup = {
         "title": title,
         "desc": formatted_body,
         "body": formatted_body,
         "permlink": unique_permlink,
         "community_id": COMMUNITY_ID,
-        "community_title": COMMUNITY_NAME,
         "post_to_blockchain": True,
-        "tags": final_tags,
-        "type": 1,
-        "posts": [
-            {
-                "title": title,
-                "desc": formatted_body,
-                "body": formatted_body,
-                "posts": formatted_body,
-                "permlink": unique_permlink,
-                "tags": final_tags,
-                "categories": "news",
-                "community": COMMUNITY_NAME,
-                "community_id": COMMUNITY_ID,
-                "post_to_blockchain": True,
-            }
-        ],
+        "posts": [payload_form]
     }
-
     try:
-        print("🚀 ব্রাউজারের মতো সরাসরি সেরি এপিআই-তে পোস্ট পাঠানো হচ্ছে...")
-        r = requests.post(draft_url, json=payload, headers=headers, timeout=35)
-        print(f"সার্ভার রেসপন্স ({r.status_code}): {r.text[:200]}")
-
+        r = requests.post("https://global-api.serey.io/api/v2/draft-post/create-or-update", json=payload_backup, headers=headers, timeout=35)
         if r.status_code in [200, 201]:
-            print(f"🎉🎉 পোস্ট সফলভাবে সেরি বাংলা কমিউনিটিতে লাইভ হয়েছে: {title}")
+            print(f"🎉🎉 পোস্ট সরাসরি সফলভাবে লাইভ হয়েছে: {title}")
             return True
-        else:
-            print(f"❌ পোস্ট ব্যর্থ হয়েছে: {r.text}")
-    except Exception as e:
-        print(f"পোস্ট এরর: {e}")
+    except Exception:
+        pass
 
     return False
 
@@ -213,6 +219,7 @@ def main():
     posted_set = set(data.get("posted", []))
 
     if not data.get("queue"):
+        print("ব্লার্ট থেকে ১ বছর আগের পোস্ট সংগ্রহ করা হচ্ছে...")
         fetched_permlinks = fetch_blurt_posts(posted_set)
         data["queue"] = fetched_permlinks
         save_data(data)
@@ -221,7 +228,6 @@ def main():
         print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।")
         return
 
-    # প্রতি রানে ১টি করে ফ্রেশ পোস্ট পাঠানো
     permlink_to_post = data["queue"].pop(0)
     post_info = get_post_details(permlink_to_post)
 
@@ -242,7 +248,7 @@ def main():
         pass
 
     print(f"\nপ্রসেস করা হচ্ছে: {title}")
-    success = post_to_serey_like_browser(token, title, body, tags)
+    success = post_to_serey_native_browser(token, title, body, tags)
 
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
