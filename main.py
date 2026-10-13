@@ -129,16 +129,21 @@ def post_with_browser(title, body, token):
         try:
             print("🔗 সেরি রাইট পেজে যাওয়া হচ্ছে...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
-            time.sleep(3)
+            time.sleep(2)
 
-            # টোকেন ইনজেক্ট
+            # ১. কুকি নোটিস ব্যানার স্থায়ীভাবে বন্ধ করা ও লগইন টোকেন ইনজেক্ট
+            token_js = token if token else ""
+            page.evaluate(
+                f"""() => {{
+                    localStorage.setItem('serey_no_cookie_notice_seen', 'true');
+                    if ('{token_js}') {{
+                        localStorage.setItem('token', '{token_js}');
+                        localStorage.setItem('accessToken', '{token_js}');
+                    }}
+                }}"""
+            )
+
             if token:
-                page.evaluate(
-                    f"""() => {{
-                        localStorage.setItem('token', '{token}');
-                        localStorage.setItem('accessToken', '{token}');
-                    }}"""
-                )
                 context.add_cookies([
                     {"name": "token", "value": token, "domain": ".serey.io", "path": "/"},
                     {"name": "accessToken", "value": token, "domain": ".serey.io", "path": "/"},
@@ -147,7 +152,15 @@ def post_with_browser(title, body, token):
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
             time.sleep(3)
 
-            # লগইন ফিল্ড থাকলে স্বয়ংক্রিয় লগইন
+            # যদি স্ক্রিনে কোনো কুকি ব্যানার বা ওভারলে থাকে তা রিমুভ করা
+            page.evaluate(
+                """() => {
+                    const overlays = document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]');
+                    overlays.forEach(el => el.remove());
+                }"""
+            )
+
+            # যদি লগইন পেজে রিডাইরেক্ট করে থাকে, তবে লগইন করা
             if "login" in page.url or page.locator("input[type='password']").count() > 0:
                 print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
                 user_input = page.locator("input[type='text'], input[name='username'], input[placeholder*='sername' i]").first
@@ -164,42 +177,44 @@ def post_with_browser(title, body, token):
 
             print("✍️ টাইটেল ও পোস্টের বিষয়বস্তু পেস্ট করা হচ্ছে...", flush=True)
 
-            # ১. টাইটেল
-            title_input = page.locator("input[placeholder*='itle' i], input[name='title'], textarea[placeholder*='itle' i]").first
+            # ২. টাইটেল ইনপুট পূরণ (force=True দেওয়া হলো যাতে কোনো ওভারলে থাকলেও সরাসরি টাইপ হয়)
+            title_input = page.locator("textarea[name='title'], input[name='title'], input[placeholder*='itle' i], textarea[placeholder*='itle' i]").first
             if title_input.count() > 0:
-                title_input.click()
-                title_input.fill(title)
+                title_input.fill(title, force=True)
             else:
-                page.locator("input[type='text']").first.fill(title)
+                page.locator("input[type='text']").first.fill(title, force=True)
 
             time.sleep(1)
 
-            # ২. এডিটর
+            # ৩. Quill এডিটরে কন্টেন্ট বসানো
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
-                editor.click()
+                editor.click(force=True)
                 page.evaluate(
                     """([selector, html]) => {
                         const el = document.querySelector(selector);
-                        if (el) { el.innerHTML = html; el.dispatchEvent(new Event('input', { bubbles: true })); }
+                        if (el) { 
+                            el.innerHTML = html; 
+                            el.dispatchEvent(new Event('input', { bubbles: true })); 
+                        }
                     }""",
                     [".ql-editor", formatted_body]
                 )
             time.sleep(2)
 
-            # ৩. প্রথম Publish বাটনে ক্লিক
+            # ৪. নিচে থাকা প্রথম "Publish" বাটনে ক্লিক (মোডাল ওপেন হবে)
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             publish_btn = page.locator("button:has-text('Publish')").last
             publish_btn.scroll_into_view_if_needed()
-            publish_btn.click()
+            publish_btn.click(force=True)
             time.sleep(3)
 
-            # ৪. মোডালের ফাইনাল Publish বাটনে ক্লিক
-            print("🎯 মোডাল কনফার্ম করে ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            # ৫. মোডাল পপ-আপের নীল "Publish" বাটনে ক্লিক
+            print("🎯 মোডাল কনফার্ম করে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish'), button:has-text('Publish')").last
-            modal_publish_btn.click()
+            modal_publish_btn.click(force=True)
 
-            # ৫. সফলতার নোটিফিকেশন চেক
+            # ৬. সফলতার নোটিফিকেশন চেক (Success toast / redirect)
             print("⏳ পোস্ট সফল হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
             for _ in range(15):
                 time.sleep(2)
@@ -219,6 +234,7 @@ def post_with_browser(title, body, token):
                 browser.close()
                 return True
 
+            print("সতর্কতা: পাবলিশ বাটন চাপার পর রেসপন্স সময় শেষ।")
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
         finally:
