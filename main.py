@@ -125,46 +125,54 @@ def perform_browser_login(page):
     """হোমপেজে নিশ্চিতভাবে আসল লগইন সম্পন্ন করা"""
     print("🔑 সেরি সাইটে আসল ব্রাউজার লগইন পরীক্ষা করা হচ্ছে...", flush=True)
 
-    # যদি অলরেডি লগইন থাকে (ইউজারনেম দেখা যায়)
+    # ১. যদি অলরেডি লগইন থাকে
     if page.locator(f"text='{SEREY_USER}'").count() > 0:
         print("✅ অলরেডি লগইন অবস্থায় রয়েছে!", flush=True)
         return True
 
-    # Sign up / Log in বাটন ক্লিক
-    login_btn = page.locator("text='Sign up / Log in', button:has-text('Log in'), a:has-text('Log in')").first
-    if login_btn.count() > 0 and login_btn.is_visible():
-        print("🔑 'Sign up / Log in' বাটনে ক্লিক করা হচ্ছে...", flush=True)
-        login_btn.click(force=True)
-        time.sleep(2)
+    # ২. 'Sign up / Log in' বাটন দৃশ্যমান হওয়া পর্যন্ত স্পষ্ট অপেক্ষা
+    try:
+        print("⏳ 'Sign up / Log in' বাটন আসার অপেক্ষা করা হচ্ছে...", flush=True)
+        login_btn = page.wait_for_selector(
+            "text='Sign up / Log in', button:has-text('Sign up / Log in'), a:has-text('Sign up / Log in')",
+            state="visible",
+            timeout=15000,
+        )
+        if login_btn:
+            print("🔑 'Sign up / Log in' বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            login_btn.click()
+            time.sleep(2)
+    except Exception as e:
+        print(f"লগইন বাটন নোটিশ: {e}", flush=True)
 
-    # লগইন মোডাল ফিল্ডে আসল কিবোর্ড টাইপিং (React form fix)
-    user_field = page.locator("input[placeholder='Username'], input[name='username']").first
-    pass_field = page.locator("input[placeholder='Private Key or Password'], input[type='password']").first
+    # ৩. লগইন মোডাল আসার অপেক্ষা ও তথ্য পূরণ
+    try:
+        print("⏳ লগইন মোডাল আসার অপেক্ষা করা হচ্ছে...", flush=True)
+        user_field = page.wait_for_selector("input[placeholder='Username'], input[name='username']", state="visible", timeout=12000)
+        pass_field = page.wait_for_selector("input[placeholder='Private Key or Password'], input[type='password']", state="visible", timeout=12000)
 
-    if user_field.count() > 0:
-        print("✍️ ইউজারনেম ও পাসওয়ার্ড টাইপ করা হচ্ছে...", flush=True)
-        user_field.click(force=True)
-        user_field.press_sequentially(SEREY_USER, delay=30)
-        time.sleep(0.5)
+        if user_field and pass_field:
+            print("✍️ ইউজারনেম ও পাসওয়ার্ড টাইপ করা হচ্ছে...", flush=True)
+            user_field.click()
+            user_field.press_sequentially(SEREY_USER, delay=35)
+            time.sleep(0.5)
 
-        pass_field.click(force=True)
-        pass_field.press_sequentially(SEREY_PASSWORD, delay=30)
-        time.sleep(0.5)
+            pass_field.click()
+            pass_field.press_sequentially(SEREY_PASSWORD, delay=35)
+            time.sleep(0.5)
 
-        # Enter চেপে ও নীল Log In বাটনে ক্লিক করে ফর্ম সাবমিট
-        print("🚀 লগইন সাবমিট করা হচ্ছে...", flush=True)
-        pass_field.press("Enter")
-        submit_btn = page.locator("div[role='dialog'] button:has-text('Log In'), .ant-modal button:has-text('Log In'), button:has-text('Log In')").first
-        if submit_btn.count() > 0:
+            # নীল Log In বাটনে ক্লিক
+            print("🚀 নীল 'Log In' বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            submit_btn = page.locator("div[role='dialog'] button:has-text('Log In'), .ant-modal button:has-text('Log In'), button:has-text('Log In')").first
             submit_btn.click(force=True)
 
-        # লগইন সফল হওয়া পর্যন্ত নিশ্চিত অপেক্ষা (ইউজারনেম লোড হওয়া)
-        print("⏳ লগইন সম্পন্ন ও প্রোফাইল লোড হওয়ার অপেক্ষা...", flush=True)
-        for _ in range(8):
-            time.sleep(1.5)
-            if page.locator(f"text='{SEREY_USER}'").count() > 0 or page.locator("text='Sign up / Log in'").count() == 0:
-                print("✅ ব্রাউজারে সফলভাবে লগইন কনফার্ম হয়েছে!", flush=True)
-                return True
+            # প্রোফাইল লোড হওয়া পর্যন্ত নিশ্চিত অপেক্ষা
+            print("⏳ প্রোফাইল লোড হওয়ার অপেক্ষা...", flush=True)
+            page.wait_for_selector(f"text='{SEREY_USER}'", state="visible", timeout=18000)
+            print("✅ ব্রাউজারে সফলভাবে লগইন কনফার্ম হয়েছে!", flush=True)
+            return True
+    except Exception as err:
+        print(f"লগইন সম্পন্ন করার নোটিশ: {err}", flush=True)
 
     return False
 
@@ -195,25 +203,21 @@ def post_with_browser(title, body):
         page = context.new_page()
 
         try:
-            # ধাপ ১: সেরি হোমপেজে যাওয়া এবং ব্যানার সরানো
+            # ধাপ ১: সেরি হোমপেজে গিয়ে লগইন নিশ্চিত করা
             print("🔗 সেরি হোমপেজে যাওয়া হচ্ছে...", flush=True)
             page.goto("https://bengali.serey.io", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
             dismiss_welcome_modal(page)
 
-            # ধাপ ২: হোমপেজেই আসল লগইন সম্পন্ন ও নিশ্চিত করা
+            # হোমপেজেই আসল সাইন-ইন সম্পন্ন ও নিশ্চিত করা
             perform_browser_login(page)
             dismiss_welcome_modal(page)
 
-            # ধাপ ৩: নিশ্চিত লগইন অবস্থায় লেখার পেজে যাওয়া
+            # ধাপ ২: নিশ্চিত লগইন অবস্থায় লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
             dismiss_welcome_modal(page)
-
-            # যদি লেখার পেজেও লগইন চায়
-            if page.locator("text='Sign up / Log in'").count() > 0:
-                perform_browser_login(page)
 
             # এডিটর লোড হওয়া পর্যন্ত অপেক্ষা
             print("⏳ এডিটর এবং ফর্ম লোড হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
@@ -246,7 +250,7 @@ def post_with_browser(title, body):
             )
             time.sleep(2)
 
-            # ধাপ ৪: নিচে স্ক্রোল করে প্রথম Publish বাটনে ক্লিক
+            # ধাপ ৩: নিচে স্ক্রোল করে প্রথম Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             page.evaluate(
                 """() => {
@@ -258,8 +262,8 @@ def post_with_browser(title, body):
             )
             time.sleep(3)
 
-            # ধাপ ৫: মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
-            print("🎯 মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            # ধাপ ৪: মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
+            print("🎯 মোডাল পপ-আপে ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             page.wait_for_selector(".modal-publish-category, div[role='dialog'], .ant-modal", state="visible", timeout=15000)
             time.sleep(1)
 
@@ -283,7 +287,7 @@ def post_with_browser(title, body):
             time.sleep(6)
             page.screenshot(path="serey_post_result.png")
 
-            # ধাপ ৬: সরাসরি প্রোফাইল ডাটাবেজ চেক করে শতভাগ নিশ্চিত হওয়া
+            # ধাপ ৫: সরাসরি প্রোফাইল ডাটাবেজ চেক করে শতভাগ নিশ্চিত হওয়া
             print("🔍 সেরি প্রোফাইল ডাটাবেজে পোস্ট লাইভ হয়েছে কিনা চেক করা হচ্ছে...", flush=True)
             for wait_round in range(1, 6):
                 time.sleep(4)
