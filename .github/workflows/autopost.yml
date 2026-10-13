@@ -32,7 +32,7 @@ jobs:
         env:
           SEREY_POSTING_KEY: ${{ secrets.SEREY_POSTING_KEY }}
           SEREY_USERNAME: raihan123
-        run: python main.py
+        run: python -u main.py
 
       - name: Save Queue and Log State
         run: |
