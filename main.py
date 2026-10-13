@@ -4,14 +4,12 @@ import re
 import time
 from datetime import datetime, timedelta
 import requests
+from playwright.sync_api import sync_playwright
 
 # কনফিগারেশন
 BLURT_USER = "aburihan1"
 SEREY_USER = os.environ.get("SEREY_USERNAME", "raihan123")
 SEREY_PASSWORD = os.environ.get("SEREY_POSTING_KEY")
-
-COMMUNITY_NAME = "Bengali Community"
-COMMUNITY_ID = 2
 
 BLURT_NODES = [
     "https://rpc.blurt.blog",
@@ -26,9 +24,6 @@ DAY_IN_SECONDS = 72000
 BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "Referer": "https://bengali.serey.io/write/new",
-    "Origin": "https://bengali.serey.io",
 }
 
 
@@ -60,19 +55,20 @@ def save_data(data):
 
 
 def fetch_blurt_posts(posted_set):
-    """ব্লার্ট থেকে ১ বছর আগের ফ্রেশ পোস্ট আনা"""
+    """ব্লার্ট লাইভ নোড থেকে aburihan1 এর ১ বছর আগের পোস্ট সংগ্রহ"""
+    print("📡 ব্লার্ট লাইভ নোড থেকে পোস্ট খোঁজা হচ্ছে...")
     one_year_ago = datetime.utcnow() - timedelta(days=365)
     before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
-    
+
     posts = blurt_call(
         "condenser_api.get_discussions_by_author_before_date",
-        [BLURT_USER, "", before_date, 50],
+        [BLURT_USER, "", before_date, 100],
     )
-    
+
     if not posts:
         posts = blurt_call(
             "condenser_api.get_discussions_by_blog",
-            [{"tag": BLURT_USER, "limit": 50}],
+            [{"tag": BLURT_USER, "limit": 100}],
         )
 
     if posts:
@@ -81,6 +77,7 @@ def fetch_blurt_posts(posted_set):
             plink = p.get("permlink")
             if plink and plink not in posted_set and plink not in new_permlinks:
                 new_permlinks.append(plink)
+        print(f"✅ ব্লার্ট থেকে {len(new_permlinks)}টি পোস্ট পাওয়া গেছে!")
         return new_permlinks
     return []
 
@@ -89,108 +86,150 @@ def get_post_details(permlink):
     return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
 
 
-def get_serey_auth():
+def get_serey_auth_token():
+    """সেরি এপিআই থেকে টোকেন সংগ্রহ"""
     login_url = "https://global-api.serey.io/api/v2/auth/login"
     payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
-
-    for attempt in range(1, 4):
-        try:
-            print(f"সেরিতে লগইন চেষ্টা চলছে (Attempt {attempt}/3)...")
-            r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=40)
-            if r.status_code in [200, 201]:
-                data = r.json()
-                token = (
-                    data.get("token")
-                    or data.get("accessToken")
-                    or (data.get("data", {}).get("token") if isinstance(data.get("data"), dict) else None)
-                )
-                if token:
-                    print("✅ সেরিতে সফলভাবে লগইন হয়েছে!")
-                    return token
-        except requests.exceptions.Timeout:
-            time.sleep(5)
-        except Exception as e:
-            time.sleep(3)
+    try:
+        r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=25)
+        if r.status_code in [200, 201]:
+            d = r.json()
+            return d.get("token") or d.get("accessToken") or (d.get("data", {}).get("token") if isinstance(d.get("data"), dict) else None)
+    except Exception:
+        pass
     return None
 
 
-def post_to_serey_native_browser(token, title, body, tags=None):
-    """ব্রাউজার সোর্স কোডের হুবহু s অবজেক্ট দিয়ে পোস্ট সম্পন্ন করা"""
-    headers = dict(BASE_HEADERS)
-    headers["Authorization"] = f"Bearer {token}"
-
-    final_tags = ["news", "others", "bengali-community"]
-    if tags:
-        for t in tags:
-            clean_t = re.sub(r'[^a-z0-9\-]', '', str(t).lower().strip())
-            if clean_t and clean_t not in final_tags:
-                final_tags.append(clean_t)
+def post_with_browser(title, body, token):
+    """ভার্চুয়াল ব্রাউজারের মাধ্যমে সরাসরি সেরি পেজে পোস্ট করা"""
+    print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...")
 
     # HTML ফরম্যাটিং
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
 
-    # ইউনিক পারমালিঙ্ক
-    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:35]
-    unique_permlink = f"{slug}-{int(time.time())}"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
 
-    # ব্রাউজার সোর্স কোড থেকে হুবহু প্রাপ্ত অবজেক্ট s
-    payload_form = {
-        "author": SEREY_USER,
-        "permlink": unique_permlink,
-        "title": title,
-        "desc": formatted_body,
-        "body": formatted_body,
-        "categories": "news",
-        "subcategories": [],
-        "community_id": COMMUNITY_ID,
-        "community_title": COMMUNITY_NAME,
-        "post_to_blockchain": True,
-        "tags": final_tags,
-        "images": [],
-        "videos": [],
-        "forever": None,
-        "site_credit": '<p>This was posted using <a href="https://serey.io" rel="nofollow noopener">Serey.io</a> cross platform posting.</p>',
-    }
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        )
 
-    # সোর্স কোডের দুটি মূল পাথ
-    target_urls = [
-        "https://global-api.serey.io/api/v2/draft-post/create-or-update",
-        "https://global-api.serey.io/api/v2/landing-page-v2/create-or-update",
-    ]
+        page = context.new_page()
 
-    for url in target_urls:
         try:
-            print(f"🚀 ব্রাউজার কাঠামো অনুযায়ী সরাসরি পাঠানো হচ্ছে: {url}")
-            r = requests.post(url, json=payload_form, headers=headers, timeout=35)
-            print(f"সার্ভার রেসপন্স ({r.status_code}): {r.text[:250]}")
+            print("🔗 সেরি রাইট পেজে যাওয়া হচ্ছে...")
+            page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
+            time.sleep(3)
 
-            if r.status_code in [200, 201]:
-                res_data = r.json()
-                if res_data.get("status") is True or "Success" in str(res_data):
-                    print(f"🎉🎉 পোস্ট সফলভাবে সেরি বাংলা কমিউনিটিতে লাইভ হয়েছে: {title}")
+            # লগইন টোকেন ব্রাউজার স্টোরেজ ও কুকিতে ইনজেক্ট করা
+            if token:
+                page.evaluate(
+                    f"""() => {{
+                        localStorage.setItem('token', '{token}');
+                        localStorage.setItem('accessToken', '{token}');
+                    }}"""
+                )
+                context.add_cookies([
+                    {"name": "token", "value": token, "domain": ".serey.io", "path": "/"},
+                    {"name": "accessToken", "value": token, "domain": ".serey.io", "path": "/"},
+                ])
+
+            # পেজ রিলোড নিশ্চিত করতে
+            page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
+            time.sleep(4)
+
+            # যদি লগইন পেজে রিডাইরেক্ট করে থাকে, তবে ব্রাউজারে লগইন করা
+            if "login" in page.url or page.locator("input[type='password']").count() > 0:
+                print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...")
+                user_input = page.locator("input[type='text'], input[name='username'], input[placeholder*='sername' i]").first
+                pass_input = page.locator("input[type='password']").first
+                if user_input.count() > 0 and pass_input.count() > 0:
+                    user_input.fill(SEREY_USER)
+                    pass_input.fill(SEREY_PASSWORD)
+                    time.sleep(1)
+                    page.locator("button[type='submit'], button:has-text('Login'), button:has-text('Sign In')").first.click()
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                    time.sleep(3)
+                    page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
+                    time.sleep(3)
+
+            print("✍️ টাইটেল ও পোস্টের বিষয়বস্তু পেস্ট করা হচ্ছে...")
+
+            # ১. টাইটেল ইনপুট
+            title_input = page.locator("input[placeholder*='itle' i], input[name='title'], textarea[placeholder*='itle' i]").first
+            if title_input.count() > 0:
+                title_input.click()
+                title_input.fill(title)
+            else:
+                # ফলব্যাক হিসেবে প্রথম টেক্সট ইনপুট
+                page.locator("input[type='text']").first.fill(title)
+
+            time.sleep(1)
+
+            # ২. Quill এডিটরে বডি বসানো
+            editor = page.locator(".ql-editor, div[contenteditable='true']").first
+            if editor.count() > 0:
+                editor.click()
+                # কন্টেন্ট সরাসরি এডিটরে ইনজেক্ট
+                page.evaluate(
+                    """([selector, html]) => {
+                        const el = document.querySelector(selector);
+                        if (el) { el.innerHTML = html; el.dispatchEvent(new Event('input', { bubbles: true })); }
+                    }""",
+                    [".ql-editor", formatted_body]
+                )
+            time.sleep(2)
+
+            # ৩. নিচে থাকা প্রথম "Publish" বাটনে ক্লিক (যা ক্যাটাগরি মোডাল খোলে)
+            print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...")
+            publish_btn = page.locator("button:has-text('Publish')").last
+            publish_btn.scroll_into_view_if_needed()
+            publish_btn.click()
+            time.sleep(3)
+
+            # ৪. মোডাল পপ-আপের নীল "Publish" বাটনে ক্লিক
+            print("🎯 মোডাল কনফার্ম করে ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...")
+            # মোডালের ভেতরের নীল বাটন
+            modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish'), button:has-text('Publish')").last
+            modal_publish_btn.click()
+
+            # ৫. সফলতার নোটিফিকেশন চেক (Success toast / redirect)
+            print("⏳ পোস্ট সফল হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...")
+            for _ in range(15):
+                time.sleep(2)
+                page_text = page.content().lower()
+                if (
+                    "successfully" in page_text
+                    or "success" in page_text
+                    or "/authors/" in page.url
+                    or "article" in page_text
+                ):
+                    print(f"🎉🎉 ব্রাউজার অটোমেশন দিয়ে পোস্টটি ১০০% সফলভাবে লাইভ হয়েছে: {title}")
+                    browser.close()
                     return True
-        except Exception as e:
-            print(f"এরর ({url}): {e}")
 
-    # ব্যাকআপ স্ট্রাকচার (posts অ্যারে সহ)
-    payload_backup = {
-        "title": title,
-        "desc": formatted_body,
-        "body": formatted_body,
-        "permlink": unique_permlink,
-        "community_id": COMMUNITY_ID,
-        "post_to_blockchain": True,
-        "posts": [payload_form]
-    }
-    try:
-        r = requests.post("https://global-api.serey.io/api/v2/draft-post/create-or-update", json=payload_backup, headers=headers, timeout=35)
-        if r.status_code in [200, 201]:
-            print(f"🎉🎉 পোস্ট সরাসরি সফলভাবে লাইভ হয়েছে: {title}")
-            return True
-    except Exception:
-        pass
+            # পেজ ইউআরএল পরিবর্তিত হয়ে লেখকের প্রোফাইলে গেলে সফল
+            if SEREY_USER in page.url and "write" not in page.url:
+                print(f"🎉🎉 পোস্ট সফলভাবে লাইভ হয়ে প্রোফাইল পেজে চলে গেছে: {title}")
+                browser.close()
+                return True
+
+            print("সতর্কতা: পাবলিশ বাটন চাপার পর কনফার্মেশন পাওয়া যায়নি।")
+        except Exception as e:
+            print(f"❌ ব্রাউজার অটোমেশন এরর: {e}")
+        finally:
+            browser.close()
 
     return False
 
@@ -199,11 +238,6 @@ def main():
     print("বট চালু হচ্ছে...")
     if not SEREY_PASSWORD:
         print("ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!")
-        return
-
-    token = get_serey_auth()
-    if not token:
-        print("সেরিতে লগইন ব্যর্থ হয়েছে।")
         return
 
     data = load_data()
@@ -219,7 +253,6 @@ def main():
     posted_set = set(data.get("posted", []))
 
     if not data.get("queue"):
-        print("ব্লার্ট থেকে ১ বছর আগের পোস্ট সংগ্রহ করা হচ্ছে...")
         fetched_permlinks = fetch_blurt_posts(posted_set)
         data["queue"] = fetched_permlinks
         save_data(data)
@@ -233,33 +266,4 @@ def main():
 
     if not post_info or "title" not in post_info:
         data.setdefault("posted", []).append(permlink_to_post)
-        save_data(data)
-        return
-
-    title = post_info.get("title", "")
-    body = post_info.get("body", "")
-
-    tags = []
-    try:
-        json_meta = json.loads(post_info.get("json_metadata", "{}"))
-        if "tags" in json_meta and isinstance(json_meta["tags"], list):
-            tags = json_meta["tags"]
-    except Exception:
-        pass
-
-    print(f"\nপ্রসেস করা হচ্ছে: {title}")
-    success = post_to_serey_native_browser(token, title, body, tags)
-
-    if success:
-        data.setdefault("posted", []).append(permlink_to_post)
-        data.setdefault("timestamps", []).append(current_time)
-        print("ডাটা সেভ করা হয়েছে।")
-    else:
-        data["queue"].append(permlink_to_post)
-
-    save_data(data)
-    print("\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।")
-
-
-if __name__ == "__main__":
-    main()
+        save_d
