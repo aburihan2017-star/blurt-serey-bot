@@ -3,9 +3,9 @@ const axios = require('axios');
 const puppeteer = require('puppeteer');
 
 // ================= কনফিগারেশন =================
-const BLURT_USER = 'aburihan1';                             // ব্লার্ট অ্যাকাউন্ট
-const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123'; // সেরি ইউজার
-const SEREY_PASS = process.env.SEREY_PASSWORD;              // সেরি পাসওয়ার্ড
+const BLURT_USER = 'aburihan1';                                                     // ব্লার্ট অ্যাকাউন্ট
+const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123';                         // সেরি ইউজার
+const SEREY_PASS = process.env.SEREY_PASSWORD || process.env.SEREY_POSTING_KEY;      // সেরি পোস্টিং কি / পাসওয়ার্ড
 
 const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
@@ -43,7 +43,7 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// শুধুমাত্র নিজের আসল পোস্ট ফিল্টার করা
+// শুধুমাত্র নিজের মূল পোস্ট সংগ্রহ
 async function fetchOneYearOldPosts(postedSet) {
   const oneYearAgo = new Date(Date.now() - 365 * DAY_IN_MS);
   const beforeDate = oneYearAgo.toISOString().split('.')[0];
@@ -81,7 +81,7 @@ async function getPostDetails(permlink) {
 }
 
 /**
- * আপনার স্ক্রিনশটের হুবহু পেজ ও পপ-আপ অটোমেশন
+ * Puppeteer দিয়ে ওয়েবসাইটে স্বয়ংক্রিয়ভাবে পোস্ট করা
  */
 async function postViaSereyBrowser(title, body) {
   console.log('🌐 হেডলেস ক্রোম ব্রাউজার চালু হচ্ছে...');
@@ -107,7 +107,7 @@ async function postViaSereyBrowser(title, body) {
     console.log('🔗 Serey ওয়েবসাইটে প্রবেশ করা হচ্ছে...');
     await page.goto('https://serey.io', { waitUntil: 'networkidle2', timeout: 60000 });
 
-    console.log('🔑 লগইন পেজে যাওয়া হচ্ছে...');
+    console.log('🔑 লগইন পপ-আপ খোলা হচ্ছে...');
     const loginLink = await page.waitForSelector('text/Sign up / Log in, text/Log in', { timeout: 15000 }).catch(() => null);
     if (loginLink) {
       await loginLink.click();
@@ -115,6 +115,8 @@ async function postViaSereyBrowser(title, body) {
       await page.goto('https://serey.io/login', { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
     }
 
+    // ইউজারনেম ও পোস্টিং কি ইনপুট
+    console.log('✍️ ইউজারনেম ও কি (Key) প্রবেশ করানো হচ্ছে...');
     await page.waitForSelector('input[type="text"], input[name="username"]', { timeout: 15000 });
     await page.type('input[type="text"], input[name="username"]', SEREY_USER, { delay: 40 });
     await page.type('input[type="password"]', SEREY_PASS, { delay: 40 });
@@ -122,22 +124,20 @@ async function postViaSereyBrowser(title, body) {
     const submitBtn = await page.$('button[type="submit"]') || await page.$('text/Login');
     if (submitBtn) await submitBtn.click();
     
-    // লগইন সম্পন্ন হতে কয়েক সেকেন্ড অপেক্ষা
     await new Promise(r => setTimeout(r, 6000));
 
-    // ২. "Write a Blog Post" পেজে যাওয়া
+    // ২. Create Post পেজে যাওয়া
     console.log('📝 "Write a Blog Post" পেজে প্রবেশ করা হচ্ছে...');
     await page.goto('https://serey.io/create-post', { waitUntil: 'networkidle2', timeout: 40000 });
     await new Promise(r => setTimeout(r, 4000));
 
-    // ৩. Title ফিল্ডে টাইটেল বসানো
+    // ৩. Title ফিল্ড পূরণ
     console.log(`✍️ টাইটেল লেখা হচ্ছে: "${title}"`);
-    // স্ক্রিনশটের * Title ফিল্ড খুঁজে বের করা
     const titleInput = await page.waitForSelector('input[placeholder*="Title"], input[maxlength="255"], textarea[placeholder*="Title"]', { timeout: 15000 });
     await titleInput.click({ clickCount: 3 });
     await titleInput.type(title, { delay: 25 });
 
-    // ৪. Content এডিটরে মূল ব্লগ পেস্ট করা
+    // ৪. Content ফিল্ডে মূল ব্লগ বডি পেস্ট করা
     console.log(`📄 ব্লগের লেখা পেস্ট করা হচ্ছে (${body.length} ক্যারেক্টার)...`);
     const editor = await page.$('textarea[name="body"]') || await page.$('.ql-editor') || await page.$('div[contenteditable="true"]');
     if (editor) {
@@ -154,22 +154,20 @@ async function postViaSereyBrowser(title, body) {
     }
     await new Promise(r => setTimeout(r, 3000));
 
-    // ৫. নিচের পাবলিশ/সাবমিট বাটনে ক্লিক (যাতে ক্যাটাগরি পপ-আপটি আসে)
-    console.log('🔘 ক্যাটাগরি মোডাল আনার জন্য বাটনে ক্লিক করা হচ্ছে...');
+    // ৫. নিচের পাবলিশ বাটনে ক্লিক (ক্যাটাগরি মোডাল আনার জন্য)
+    console.log('🔘 ক্যাটাগরি পপ-আপ আনার জন্য বাটনে ক্লিক করা হচ্ছে...');
     const initialPublishBtn = await page.$('button[type="submit"]') || await page.$('text/Publish') || await page.$('text/Post');
     if (initialPublishBtn) {
       await initialPublishBtn.click();
     }
     await new Promise(r => setTimeout(r, 3000));
 
-    // ৬. স্ক্রিনশটে দেখানো "Your post belongs to category:" পপ-আপ পরিচালনা
+    // ৬. "Your post belongs to category:" পপ-আপে নীল Publish বাটনে ক্লিক
     console.log('🔍 ক্যাটাগরি পপ-আপের জন্য অপেক্ষা করা হচ্ছে...');
     const modalCategory = await page.waitForSelector('text/Your post belongs to category:', { timeout: 10000 }).catch(() => null);
     
     if (modalCategory) {
       console.log('✅ ক্যাটাগরি পপ-আপ পাওয়া গেছে!');
-      
-      // পপ-আপের ভেতরের নীল "Publish" বাটনে ক্লিক
       console.log('🚀 পপ-আপের নীল "Publish" বাটনে ক্লিক করা হচ্ছে...');
       const finalPublishBtn = await page.evaluateHandle(() => {
         const buttons = Array.from(document.querySelectorAll('button'));
@@ -182,7 +180,7 @@ async function postViaSereyBrowser(title, body) {
         await new Promise(r => setTimeout(r, 12000));
       }
     } else {
-      console.log('⚠️ পপ-আপ না এসে সরাসরি সাবমিট হতে পারে, ৮ সেকেন্ড অপেক্ষা...');
+      console.log('⚠️ সরাসরি সাবমিট হতে পারে, ৮ সেকেন্ড অপেক্ষা...');
       await new Promise(r => setTimeout(r, 8000));
     }
 
@@ -192,7 +190,6 @@ async function postViaSereyBrowser(title, body) {
 
   } catch (err) {
     console.error('❌ ব্রাউজার অটোমেশন এরর:', err.message);
-    await page.screenshot({ path: 'browser_error.png' }).catch(() => {});
     await browser.close();
     return false;
   }
@@ -201,7 +198,7 @@ async function postViaSereyBrowser(title, body) {
 async function main() {
   console.log('🤖 Puppeteer ব্রাউজার বট চালু হচ্ছে...');
   if (!SEREY_PASS) {
-    console.error('❌ ত্রুটি: SEREY_PASSWORD পাওয়া যায়নি! GitHub Secrets-এ যোগ করুন।');
+    console.error('❌ ত্রুটি: SEREY_POSTING_KEY বা SEREY_PASSWORD পাওয়া যায়নি! GitHub Secrets চেক করুন।');
     return;
   }
 
@@ -257,3 +254,17 @@ async function main() {
   const success = await postViaSereyBrowser(title, body);
 
   if (success) {
+    data.posted = data.posted || [];
+    data.posted.push(permlinkKey);
+    data.timestamps = data.timestamps || [];
+    data.timestamps.push(now);
+    console.log('✅ ডাটা সেভ করা হয়েছে।');
+  } else {
+    data.queue.unshift(postSelected);
+  }
+
+  saveData(data);
+  console.log('\n✨ সম্পূর্ণ প্রক্রিয়া সফলভাবে সম্পন্ন হয়েছে।');
+}
+
+main();
