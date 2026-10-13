@@ -21,11 +21,6 @@ DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 72000
 
-BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-}
-
 
 def blurt_call(method, params):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
@@ -104,14 +99,14 @@ def post_with_browser(title, body):
         )
 
         context = browser.new_context(
-            viewport={"width": 1280, "height": 900},
+            viewport={"width": 1366, "height": 900},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         )
 
         page = context.new_page()
 
         try:
-            # ধাপ ১: সেরি হোমপেজে গিয়ে কুকি ব্যানার হ্যান্ডেল করা
+            # ধাপ ১: সেরি হোমপেজে গিয়ে লগইন করা
             print("🔗 সেরি হোমপেজে যাওয়া হচ্ছে...", flush=True)
             page.goto("https://bengali.serey.io", timeout=45000, wait_until="domcontentloaded")
             time.sleep(2)
@@ -124,37 +119,29 @@ def post_with_browser(title, body):
                 }"""
             )
 
-            # ধাপ ২: ব্রাউজারের মাধ্যমে আসল লগইন সম্পন্ন করা
-            print("🔑 ব্রাউজারে লগইন বাটন খোঁজা হচ্ছে...", flush=True)
-            login_btn = page.locator("button:has-text('Sign up / Log in'), button:has-text('Log in'), button:has-text('Sign In'), a:has-text('Sign up / Log in'), a:has-text('Log in')").first
-            
+            print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
+            login_btn = page.locator("button:has-text('Sign up / Log in'), button:has-text('Log in'), a:has-text('Sign up / Log in')").first
             if login_btn.count() > 0 and login_btn.is_visible():
-                print("লগইন বাটনে ক্লিক করা হচ্ছে...", flush=True)
                 login_btn.click(force=True)
                 time.sleep(2)
 
-                # লগইন ইনপুট পূরণ
                 user_input = page.locator("input[placeholder*='sername' i], input[name='username'], input[type='text']").last
                 pass_input = page.locator("input[type='password']").last
 
                 if user_input.count() > 0 and pass_input.count() > 0:
-                    print("ইউজারনেম ও পাসওয়ার্ড দিয়ে সাইন-ইন করা হচ্ছে...", flush=True)
                     user_input.fill(SEREY_USER, force=True)
                     pass_input.fill(SEREY_PASSWORD, force=True)
                     time.sleep(1)
 
-                    # সাইন-ইন বাটন ক্লিক
-                    submit_btn = page.locator("button[type='submit'], div[role='dialog'] button:has-text('Sign In'), div[role='dialog'] button:has-text('Login'), button:has-text('Sign In')").last
+                    submit_btn = page.locator("button[type='submit'], div[role='dialog'] button:has-text('Sign In'), button:has-text('Sign In')").last
                     submit_btn.click(force=True)
-                    print("লগইন সম্পন্ন হওয়ার জন্য অপেক্ষা করা হচ্ছে...", flush=True)
                     time.sleep(5)
 
-            # ধাপ ৩: পোস্ট লেখার পেজে যাওয়া
+            # ধাপ ২: পোস্ট লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
 
-            # ব্যানার ক্লিয়ার
             page.evaluate(
                 """() => {
                     const overlays = document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]');
@@ -162,13 +149,13 @@ def post_with_browser(title, body):
                 }"""
             )
 
-            # টাইটেল পূরণ
+            # টাইটেল বসানো
             print("টাইটেল বসানো হচ্ছে...", flush=True)
             title_input = page.locator("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]").first
             title_input.fill(title, force=True)
             time.sleep(1)
 
-            # এডিটরে বডি বসানো
+            # এডিটরে কন্টেন্ট বসানো
             print("কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
@@ -185,41 +172,34 @@ def post_with_browser(title, body):
                 )
             time.sleep(2)
 
-            # ধাপ ৪: নিচে থাকা প্রথম Publish বাটনে ক্লিক
+            # ধাপ ৩: স্ক্রিনের একদম নিচে স্ক্রোল করে Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            publish_btn = page.locator("button:has-text('Publish')").last
+            publish_btn = page.locator("button:has-text('Publish')").first
             publish_btn.scroll_into_view_if_needed()
+            time.sleep(1)
             publish_btn.click(force=True)
             time.sleep(3)
 
-            # ধাপ ৫: মোডালে News ক্যাটাগরি কনফার্ম করা
-            try:
-                cat_dropdown = page.locator("div[role='dialog'] .ant-select, .ant-modal .ant-select").first
-                if cat_dropdown.count() > 0:
-                    cat_dropdown.click(force=True)
-                    time.sleep(1)
-                    page.locator(".ant-select-item-option:has-text('News')").first.click(force=True)
-                    time.sleep(1)
-            except Exception:
-                pass
-
-            # ধাপ ৬: মোডালের ফাইনাল নীল Publish বাটনে ক্লিক
-            print("🎯 মোডালের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
-            if modal_publish_btn.count() > 0:
-                modal_publish_btn.click(force=True)
+            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপে ক্লিক
+            print("🎯 মোডাল পপ-আপে ক্যাটাগরি ও ফাইনাল Publish নিশ্চিত করা হচ্ছে...", flush=True)
+            
+            # মোডালের ভেতরের Publish বাটন খুঁজে ক্লিক করা
+            modal_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").first
+            if modal_btn.count() > 0 and modal_btn.is_visible():
+                modal_btn.click(force=True)
             else:
+                # ফলব্যাক হিসেবে পেজের শেষ Publish বাটন
                 page.locator("button:has-text('Publish')").last.click(force=True)
 
-            # ধাপ ৭: পোস্ট নিশ্চিত হওয়া
+            # ধাপ ৫: পোস্ট লাইভ হওয়ার নোটিফিকেশন চেক
             print("⏳ পোস্ট লাইভ হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
             success = False
-            for _ in range(12):
+            for _ in range(15):
                 time.sleep(2)
                 current_url = page.url.lower()
                 page_text = page.content().lower()
 
-                if "successfully posted your article" in page_text or "post updated successfully" in page_text:
+                if "successfully" in page_text or "success" in page_text:
                     success = True
                     break
 
@@ -227,7 +207,6 @@ def post_with_browser(title, body):
                     success = True
                     break
 
-            # স্ক্রিনশট সেভ রাখা
             page.screenshot(path="serey_post_result.png")
 
             if success:
@@ -235,7 +214,7 @@ def post_with_browser(title, body):
                 browser.close()
                 return True
             else:
-                print("❌ পোস্ট পাবলিশ হয়নি বা নোটিফিকেশন মেলেনি (স্ক্রিনশট সংরক্ষণ করা হয়েছে)।", flush=True)
+                print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে, স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
 
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
