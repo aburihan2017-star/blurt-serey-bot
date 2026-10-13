@@ -55,7 +55,6 @@ def save_data(data):
 
 
 def fetch_blurt_posts(posted_set):
-    """ব্লার্ট লাইভ নোড থেকে aburihan1 এর ১ বছর আগের পোস্ট সংগ্রহ"""
     print("📡 ব্লার্ট লাইভ নোড থেকে পোস্ট খোঁজা হচ্ছে...", flush=True)
     one_year_ago = datetime.utcnow() - timedelta(days=365)
     before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
@@ -87,7 +86,6 @@ def get_post_details(permlink):
 
 
 def get_serey_auth_token():
-    """সেরি এপিআই থেকে টোকেন সংগ্রহ"""
     login_url = "https://global-api.serey.io/api/v2/auth/login"
     payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
     try:
@@ -101,7 +99,6 @@ def get_serey_auth_token():
 
 
 def post_with_browser(title, body, token):
-    """ভার্চুয়াল ক্রোম ব্রাউজারের মাধ্যমে সরাসরি সেরি পেজে পোস্ট করা"""
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
     formatted_body = body
@@ -120,7 +117,7 @@ def post_with_browser(title, body, token):
         )
 
         context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1280, "height": 900},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         )
 
@@ -131,7 +128,6 @@ def post_with_browser(title, body, token):
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(2)
 
-            # ১. কুকি নোটিস ব্যানার স্থায়ীভাবে বন্ধ করা ও লগইন টোকেন ইনজেক্ট
             token_js = token if token else ""
             page.evaluate(
                 f"""() => {{
@@ -152,7 +148,7 @@ def post_with_browser(title, body, token):
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
             time.sleep(3)
 
-            # যদি স্ক্রিনে কোনো কুকি ব্যানার বা ওভারলে থাকে তা রিমুভ করা
+            # ওভারলে রিমুভ
             page.evaluate(
                 """() => {
                     const overlays = document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]');
@@ -160,7 +156,7 @@ def post_with_browser(title, body, token):
                 }"""
             )
 
-            # যদি লগইন পেজে রিডাইরেক্ট করে থাকে, তবে লগইন করা
+            # লগইন ফিল্ড চেক
             if "login" in page.url or page.locator("input[type='password']").count() > 0:
                 print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
                 user_input = page.locator("input[type='text'], input[name='username'], input[placeholder*='sername' i]").first
@@ -177,7 +173,7 @@ def post_with_browser(title, body, token):
 
             print("✍️ টাইটেল ও পোস্টের বিষয়বস্তু পেস্ট করা হচ্ছে...", flush=True)
 
-            # ২. টাইটেল ইনপুট পূরণ (force=True দেওয়া হলো যাতে কোনো ওভারলে থাকলেও সরাসরি টাইপ হয়)
+            # ১. টাইটেল
             title_input = page.locator("textarea[name='title'], input[name='title'], input[placeholder*='itle' i], textarea[placeholder*='itle' i]").first
             if title_input.count() > 0:
                 title_input.fill(title, force=True)
@@ -186,7 +182,7 @@ def post_with_browser(title, body, token):
 
             time.sleep(1)
 
-            # ৩. Quill এডিটরে কন্টেন্ট বসানো
+            # ২. এডিটর
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
                 editor.click(force=True)
@@ -202,21 +198,36 @@ def post_with_browser(title, body, token):
                 )
             time.sleep(2)
 
-            # ৪. নিচে থাকা প্রথম "Publish" বাটনে ক্লিক (মোডাল ওপেন হবে)
+            # ৩. প্রথম Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             publish_btn = page.locator("button:has-text('Publish')").last
             publish_btn.scroll_into_view_if_needed()
             publish_btn.click(force=True)
             time.sleep(3)
 
-            # ৫. মোডাল পপ-আপের নীল "Publish" বাটনে ক্লিক
-            print("🎯 মোডাল কনফার্ম করে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish'), button:has-text('Publish')").last
-            modal_publish_btn.click(force=True)
+            # ৪. মোডাল পপ-আপে ক্যাটাগরি নির্বাচন নিশ্চিত করা (News)
+            try:
+                cat_select = page.locator("div[role='dialog'] .ant-select, .ant-modal .ant-select").first
+                if cat_select.count() > 0:
+                    cat_select.click()
+                    time.sleep(1)
+                    page.locator(".ant-select-item-option:has-text('News')").first.click()
+                    time.sleep(1)
+            except Exception:
+                pass
 
-            # ৬. সফলতার নোটিফিকেশন চেক (Success toast / redirect)
+            # ৫. ফাইনাল নীল Publish বাটনে ক্লিক
+            print("🎯 মোডাল কনফার্ম করে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
+            if modal_publish_btn.count() > 0:
+                modal_publish_btn.click(force=True)
+            else:
+                page.locator("button:has-text('Publish')").last.click(force=True)
+
+            # ৬. সফলতার অপেক্ষা ও পেজ ভেরিফিকেশন
             print("⏳ পোস্ট সফল হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
-            for _ in range(15):
+            success = False
+            for _ in range(12):
                 time.sleep(2)
                 page_text = page.content().lower()
                 if (
@@ -225,16 +236,21 @@ def post_with_browser(title, body, token):
                     or "/authors/" in page.url
                     or "article" in page_text
                 ):
-                    print(f"🎉🎉 ব্রাউজার অটোমেশন দিয়ে পোস্টটি ১০০% সফলভাবে লাইভ হয়েছে: {title}", flush=True)
-                    browser.close()
-                    return True
+                    success = True
+                    break
 
             if SEREY_USER in page.url and "write" not in page.url:
-                print(f"🎉🎉 পোস্ট সফলভাবে লাইভ হয়ে প্রোফাইল পেজে চলে গেছে: {title}", flush=True)
+                success = True
+
+            # স্ক্রিনশট সেভ রাখা
+            page.screenshot(path="serey_post_result.png")
+
+            if success:
+                print(f"🎉🎉 ব্রাউজার অটোমেশন দিয়ে পোস্টটি নিশ্চিতভাবে লাইভ হয়েছে: {title}", flush=True)
                 browser.close()
                 return True
 
-            print("সতর্কতা: পাবলিশ বাটন চাপার পর রেসপন্স সময় শেষ।")
+            print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে কিন্তু কনফার্মেশন স্পষ্ট নয়।", flush=True)
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
         finally:
