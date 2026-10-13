@@ -1,42 +1,27 @@
 const fs = require('fs');
 const axios = require('axios');
-const serey = require('sereyjs');
+const puppeteer = require('puppeteer');
 
-// কনফিগারেশন
-const BLURT_USER = 'aburihan1';
-const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123';
-const SEREY_POSTING_KEY = (process.env.SEREY_POSTING_KEY || '').trim();
+// ================= কনফিগারেশন =================
+const BLURT_USER = 'aburihan1';                             // ব্লার্ট অ্যাকাউন্ট
+const SEREY_USER = process.env.SEREY_USERNAME || 'raihan123'; // সেরি ইউজার
+const SEREY_PASS = process.env.SEREY_PASSWORD;              // সেরি পাসওয়ার্ড
 
 const DATA_FILE = 'automation_data.json';
 const MAX_DAILY_POSTS = 2;
 const DAY_IN_MS = 86400 * 1000;
 
-const SEREY_CHAIN_ID = '5205c25d3e87cb3e8e527e6fbbf324b7b2b9fe7a7192c604ce5b174d08987324';
-const SEREY_PREFIX = 'SRY';
-
-// সেরি চেইন কনফিগ সেট
-serey.config.set('address_prefix', SEREY_PREFIX);
-serey.config.set('chain_id', SEREY_CHAIN_ID);
-
-const BASE_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Accept': 'application/json, text/plain, */*',
-  'Content-Type': 'application/json',
-  'Referer': 'https://bengali.serey.io/write/new',
-  'Origin': 'https://bengali.serey.io',
-};
-
 const BLURT_NODES = [
-  'https://rpc.blurt.blog',
-  'https://rpc.beblurt.com',
-  'https://blurtrpc.dagobert.uk',
+  'https://blurt-rpc.saboin.com',
+  'https://rpc.blurt.one',
+  'https://blurt.world',
 ];
 
 async function blurtCall(method, params) {
   const payload = { jsonrpc: '2.0', method, params, id: 1 };
   for (const node of BLURT_NODES) {
     try {
-      const res = await axios.post(node, payload, { timeout: 8000 });
+      const res = await axios.post(node, payload, { timeout: 12000 });
       if (res.data && res.data.result) return res.data.result;
     } catch (e) {
       continue;
@@ -58,20 +43,32 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
+// শুধুমাত্র নিজের আসল পোস্ট ফিল্টার করা
 async function fetchOneYearOldPosts(postedSet) {
   const oneYearAgo = new Date(Date.now() - 365 * DAY_IN_MS);
   const beforeDate = oneYearAgo.toISOString().split('.')[0];
+  
   const posts = await blurtCall('condenser_api.get_discussions_by_author_before_date', [
     BLURT_USER,
     '',
     beforeDate,
     100,
   ]);
-  if (posts) {
+
+  if (posts && Array.isArray(posts)) {
     const list = [];
     for (const p of posts.reverse()) {
-      if (p.permlink && !postedSet.has(p.permlink)) {
-        list.push(p.permlink);
+      const isOriginal = p.author === BLURT_USER;
+      const isRoot = !p.parent_author || p.parent_author === '';
+      const hasContent = p.title && p.title.trim().length > 0 && p.body && p.body.trim().length > 50;
+      const notPosted = !postedSet.has(p.permlink);
+
+      if (isOriginal && isRoot && hasContent && notPosted) {
+        list.push({
+          permlink: p.permlink,
+          title: p.title.trim(),
+          body: p.body.trim()
+        });
       }
     }
     return list;
@@ -83,144 +80,128 @@ async function getPostDetails(permlink) {
   return blurtCall('condenser_api.get_content', [BLURT_USER, permlink]);
 }
 
-// সেরি ওয়েব লগইন টোকেন আনা
-async function getSereyToken() {
-  try {
-    const loginUrl = 'https://global-api.serey.io/api/v2/auth/login';
-    const payload = { username: SEREY_USER, password: SEREY_POSTING_KEY };
-    const r = await axios.post(loginUrl, payload, { headers: BASE_HEADERS, timeout: 20000 });
-    const data = r.data;
-    return data.token || data.accessToken || data.data?.token || data.data?.accessToken;
-  } catch (err) {
-    return null;
-  }
-}
-
-// সেরি ব্লকচেইন নোডে প্রমাণিত HTTP RPC কল
-async function sendSereyHttpRpc(api, method, params = []) {
-  const payload = {
-    jsonrpc: '2.0',
-    method: 'call',
-    params: [api, method, params],
-    id: 1,
-  };
-
-  const res = await axios.post('https://api.serey.io', payload, {
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': BASE_HEADERS['User-Agent'],
-    },
-    timeout: 20000,
+/**
+ * আপনার স্ক্রিনশটের হুবহু পেজ ও পপ-আপ অটোমেশন
+ */
+async function postViaSereyBrowser(title, body) {
+  console.log('🌐 হেডলেস ক্রোম ব্রাউজার চালু হচ্ছে...');
+  
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote',
+      '--single-process'
+    ]
   });
 
-  if (res.data && res.data.error) {
-    throw new Error(JSON.stringify(res.data.error));
-  }
-  return res.data ? res.data.result : null;
-}
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+  await page.setViewport({ width: 1366, height: 768 });
 
-// সেরি ব্লকচেইন ও ওয়েব ডাটাবেজে একই সাথে পোস্ট সম্পন্ন করা (ব্রাউজারের মতো অবিকল)
-async function postDualSerey(title, body, permlink) {
   try {
-    // ধাপ ১: ব্লকচেইনে সাইন ও ব্রডকাস্ট
-    console.log('📡 সেরি ব্লকচেইন নোড থেকে বর্তমান ব্লক ডাটা সংগ্রহ করা হচ্ছে...');
-    const dgp = await sendSereyHttpRpc('database_api', 'get_dynamic_global_properties', []);
+    // ১. ওয়েবসাইটে ঢুকে লগইন করা
+    console.log('🔗 Serey ওয়েবসাইটে প্রবেশ করা হচ্ছে...');
+    await page.goto('https://serey.io', { waitUntil: 'networkidle2', timeout: 60000 });
+
+    console.log('🔑 লগইন পেজে যাওয়া হচ্ছে...');
+    const loginLink = await page.waitForSelector('text/Sign up / Log in, text/Log in', { timeout: 15000 }).catch(() => null);
+    if (loginLink) {
+      await loginLink.click();
+    } else {
+      await page.goto('https://serey.io/login', { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+    }
+
+    await page.waitForSelector('input[type="text"], input[name="username"]', { timeout: 15000 });
+    await page.type('input[type="text"], input[name="username"]', SEREY_USER, { delay: 40 });
+    await page.type('input[type="password"]', SEREY_PASS, { delay: 40 });
+
+    const submitBtn = await page.$('button[type="submit"]') || await page.$('text/Login');
+    if (submitBtn) await submitBtn.click();
     
-    const headBlockNumber = dgp.head_block_number;
-    const headBlockId = dgp.head_block_id;
-    const refBlockNum = headBlockNumber & 0xffff;
-    const refBlockPrefix = Buffer.from(headBlockId, 'hex').readUInt32LE(4);
-    const blockTime = new Date(dgp.time + 'Z').getTime();
-    const expiration = new Date(blockTime + 60000).toISOString().split('.')[0];
+    // লগইন সম্পন্ন হতে কয়েক সেকেন্ড অপেক্ষা
+    await new Promise(r => setTimeout(r, 6000));
 
-    let formattedBody = body;
-    if (!formattedBody.includes('<p>') && !formattedBody.includes('<div>')) {
-      formattedBody = `<p>${body.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+    // ২. "Write a Blog Post" পেজে যাওয়া
+    console.log('📝 "Write a Blog Post" পেজে প্রবেশ করা হচ্ছে...');
+    await page.goto('https://serey.io/create-post', { waitUntil: 'networkidle2', timeout: 40000 });
+    await new Promise(r => setTimeout(r, 4000));
+
+    // ৩. Title ফিল্ডে টাইটেল বসানো
+    console.log(`✍️ টাইটেল লেখা হচ্ছে: "${title}"`);
+    // স্ক্রিনশটের * Title ফিল্ড খুঁজে বের করা
+    const titleInput = await page.waitForSelector('input[placeholder*="Title"], input[maxlength="255"], textarea[placeholder*="Title"]', { timeout: 15000 });
+    await titleInput.click({ clickCount: 3 });
+    await titleInput.type(title, { delay: 25 });
+
+    // ৪. Content এডিটরে মূল ব্লগ পেস্ট করা
+    console.log(`📄 ব্লগের লেখা পেস্ট করা হচ্ছে (${body.length} ক্যারেক্টার)...`);
+    const editor = await page.$('textarea[name="body"]') || await page.$('.ql-editor') || await page.$('div[contenteditable="true"]');
+    if (editor) {
+      await editor.focus();
+      await page.evaluate((el, text) => {
+        if (el.tagName === 'TEXTAREA') {
+          el.value = text;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          el.innerText = text;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, editor, body);
     }
+    await new Promise(r => setTimeout(r, 3000));
 
-    const op = [
-      'comment',
-      {
-        parent_author: '',
-        parent_permlink: 'bengali-community',
-        author: SEREY_USER,
-        permlink: permlink,
-        title: title,
-        body: formattedBody,
-        json_metadata: '',
-      },
-    ];
+    // ৫. নিচের পাবলিশ/সাবমিট বাটনে ক্লিক (যাতে ক্যাটাগরি পপ-আপটি আসে)
+    console.log('🔘 ক্যাটাগরি মোডাল আনার জন্য বাটনে ক্লিক করা হচ্ছে...');
+    const initialPublishBtn = await page.$('button[type="submit"]') || await page.$('text/Publish') || await page.$('text/Post');
+    if (initialPublishBtn) {
+      await initialPublishBtn.click();
+    }
+    await new Promise(r => setTimeout(r, 3000));
 
-    const tx = {
-      ref_block_num: refBlockNum,
-      ref_block_prefix: refBlockPrefix,
-      expiration: expiration,
-      operations: [op],
-      extensions: [],
-    };
+    // ৬. স্ক্রিনশটে দেখানো "Your post belongs to category:" পপ-আপ পরিচালনা
+    console.log('🔍 ক্যাটাগরি পপ-আপের জন্য অপেক্ষা করা হচ্ছে...');
+    const modalCategory = await page.waitForSelector('text/Your post belongs to category:', { timeout: 10000 }).catch(() => null);
+    
+    if (modalCategory) {
+      console.log('✅ ক্যাটাগরি পপ-আপ পাওয়া গেছে!');
+      
+      // পপ-আপের ভেতরের নীল "Publish" বাটনে ক্লিক
+      console.log('🚀 পপ-আপের নীল "Publish" বাটনে ক্লিক করা হচ্ছে...');
+      const finalPublishBtn = await page.evaluateHandle(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        return buttons.find(b => b.textContent.trim() === 'Publish');
+      });
 
-    console.log(`🔑 আসল অনুমোদিত পোস্টিং কি দিয়ে ট্রানজাকশন সাইন করা হচ্ছে...`);
-    const signedTx = serey.auth.signTransaction(tx, [SEREY_POSTING_KEY]);
-
-    console.log(`🚀 ১. সেরি ব্লকচেইনে সরাসরি ব্রডকাস্ট করা হচ্ছে: ${title}`);
-    await sendSereyHttpRpc('network_broadcast_api', 'broadcast_transaction_synchronous', [signedTx]);
-    console.log(`🎉🎉 পোস্ট সরাসরি ব্লকচেইনে সফলভাবে রেকর্ড হয়েছে!`);
-
-    // ধাপ ২: সেরি ওয়েব ডাটাবেজে (MongoDB) রেজিস্টার করা (ব্রাউজারের h.lF ফাংশন অনুযায়ী)
-    console.log(`📝 ২. সেরি ওয়েব ডাটাবেজে পোস্ট রেজিস্টার করা হচ্ছে...`);
-    const token = await getSereyToken();
-    if (token) {
-      const headers = { ...BASE_HEADERS, Authorization: `Bearer ${token}` };
-      const webPayload = {
-        title: title,
-        desc: formattedBody,
-        body: formattedBody,
-        permlink: permlink,
-        community_id: 2,
-        community_title: 'Bengali Community',
-        post_to_blockchain: true,
-        tags: ['news', 'others', 'bengali-community'],
-        type: 1,
-        posts: [
-          {
-            title: title,
-            desc: formattedBody,
-            body: formattedBody,
-            posts: formattedBody,
-            permlink: permlink,
-            tags: ['news', 'others', 'bengali-community'],
-            categories: 'news',
-            community: 'Bengali Community',
-            community_id: 2,
-            post_to_blockchain: true,
-          }
-        ],
-      };
-
-      try {
-        await axios.post('https://global-api.serey.io/api/v2/draft-post/create-or-update', webPayload, { headers, timeout: 20000 });
-        console.log(`✅ সেরি ওয়েব ডাটাবেজে পোস্ট সফলভাবে সিঙ্ক হয়েছে!`);
-      } catch (dbErr) {
-        console.log('ডাটাবেজ সিঙ্ক নোটিশ:', dbErr.message);
+      if (finalPublishBtn) {
+        await finalPublishBtn.click();
+        console.log('⏳ পোস্ট সম্পূর্ণ সাবমিট হওয়ার জন্য অপেক্ষা করা হচ্ছে...');
+        await new Promise(r => setTimeout(r, 12000));
       }
+    } else {
+      console.log('⚠️ পপ-আপ না এসে সরাসরি সাবমিট হতে পারে, ৮ সেকেন্ড অপেক্ষা...');
+      await new Promise(r => setTimeout(r, 8000));
     }
 
-    // ওয়েবসাইট ক্যাশ রিফ্রেশ
-    try {
-      await axios.get(`https://global-api.serey.io/api/v2/serey-web/list-by-author?author=${SEREY_USER}&limit=5&offset=0`, { timeout: 10000 });
-    } catch (e) {}
-
+    console.log('🎉 পোস্ট সফলভাবে ওয়েবসাইটে পাবলিশ হয়েছে!');
+    await browser.close();
     return true;
+
   } catch (err) {
-    console.error(`❌ ব্রডকাস্ট এরর:`, err.message);
+    console.error('❌ ব্রাউজার অটোমেশন এরর:', err.message);
+    await page.screenshot({ path: 'browser_error.png' }).catch(() => {});
+    await browser.close();
     return false;
   }
 }
 
 async function main() {
-  console.log('বট চালু হচ্ছে...');
-  if (!SEREY_POSTING_KEY) {
-    console.error('ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!');
+  console.log('🤖 Puppeteer ব্রাউজার বট চালু হচ্ছে...');
+  if (!SEREY_PASS) {
+    console.error('❌ ত্রুটি: SEREY_PASSWORD পাওয়া যায়নি! GitHub Secrets-এ যোগ করুন।');
     return;
   }
 
@@ -236,50 +217,43 @@ async function main() {
   const postedSet = new Set(data.posted || []);
 
   if (!data.queue || data.queue.length === 0) {
-    console.log('ব্লার্ট থেকে ১ বছর আগের পোস্ট আনা হচ্ছে...');
+    console.log(`ব্লার্ট (@${BLURT_USER}) থেকে পোস্ট আনা হচ্ছে...`);
     const fetched = await fetchOneYearOldPosts(postedSet);
     data.queue = fetched;
     saveData(data);
   }
 
-  if (!data.queue || data.queue.length === 0) {
-    console.log('পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।');
-    return;
+  let postSelected = null;
+  while (data.queue.length > 0) {
+    const item = data.queue.shift();
+    let title = typeof item === 'object' ? item.title : null;
+    let body = typeof item === 'object' ? item.body : null;
+    let permlinkKey = typeof item === 'object' ? item.permlink : item;
+
+    if (!title || !body) {
+      const details = await getPostDetails(permlinkKey);
+      if (details && details.author === BLURT_USER && details.title && details.body) {
+        title = details.title.trim();
+        body = details.body.trim();
+      }
+    }
+
+    if (title && body && body.length > 50) {
+      postSelected = { title, body, permlinkKey };
+      break;
+    } else {
+      data.posted = data.posted || [];
+      data.posted.push(permlinkKey);
+    }
   }
 
-  const permlinkToPost = data.queue.shift();
-  const postInfo = await getPostDetails(permlinkToPost);
-
-  if (!postInfo || !postInfo.title) {
-    console.log(`পোস্ট ডাটা পাওয়া যায়নি, স্কিপ: ${permlinkToPost}`);
-    data.posted = data.posted || [];
-    data.posted.push(permlinkToPost);
+  if (!postSelected) {
+    console.log('কোনো বৈধ পোস্ট পাওয়া যায়নি।');
     saveData(data);
     return;
   }
 
-  const title = postInfo.title;
-  const body = postInfo.body;
-
-  // পরিষ্কার ইউনিক পারমালিঙ্ক তৈরি
-  const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const sereyPermlink = `${cleanTitle.slice(0, 38)}-${Date.now().toString(36)}`;
-
-  console.log(`\nপ্রসেস করা হচ্ছে: ${title}`);
-  const success = await postDualSerey(title, body, sereyPermlink);
+  const { title, body, permlinkKey } = postSelected;
+  const success = await postViaSereyBrowser(title, body);
 
   if (success) {
-    data.posted = data.posted || [];
-    data.posted.push(permlinkToPost);
-    data.timestamps = data.timestamps || [];
-    data.timestamps.push(now);
-    console.log('ডাটা সেভ করা হয়েছে।');
-  } else {
-    data.queue.push(permlinkToPost);
-  }
-
-  saveData(data);
-  console.log('\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।');
-}
-
-main();
