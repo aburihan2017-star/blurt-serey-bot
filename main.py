@@ -120,55 +120,6 @@ def dismiss_welcome_modal(page):
     time.sleep(1)
 
 
-def perform_browser_login(page):
-    print("🔑 সেরি সাইটে আসল ব্রাউজার লগইন পরীক্ষা করা হচ্ছে...", flush=True)
-
-    if page.locator(f"text='{SEREY_USER}'").count() > 0:
-        print("✅ অলরেডি লগইন অবস্থায় রয়েছে!", flush=True)
-        return True
-
-    dismiss_welcome_modal(page)
-
-    try:
-        login_btn = page.wait_for_selector(
-            "text='Sign up / Log in', button:has-text('Sign up / Log in'), a:has-text('Sign up / Log in')",
-            state="visible",
-            timeout=15000,
-        )
-        if login_btn:
-            print("🔑 'Sign up / Log in' বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            login_btn.click(force=True)
-            time.sleep(2)
-    except Exception as e:
-        print(f"লগইন বাটন নোটিশ: {e}", flush=True)
-
-    try:
-        user_field = page.wait_for_selector("input[placeholder='Username'], input[name='username']", state="visible", timeout=12000)
-        pass_field = page.wait_for_selector("input[placeholder='Private Key or Password'], input[type='password']", state="visible", timeout=12000)
-
-        if user_field and pass_field:
-            print("✍️ ইউজারনেম ও পাসওয়ার্ড টাইপ করা হচ্ছে...", flush=True)
-            user_field.click()
-            user_field.press_sequentially(SEREY_USER, delay=35)
-            time.sleep(0.5)
-
-            pass_field.click()
-            pass_field.press_sequentially(SEREY_PASSWORD, delay=35)
-            time.sleep(0.5)
-
-            submit_btn = page.locator("div[role='dialog'] button:has-text('Log In'), .ant-modal button:has-text('Log In'), button:has-text('Log In')").first
-            submit_btn.click(force=True)
-
-            print("⏳ প্রোফাইল লোড হওয়ার অপেক্ষা...", flush=True)
-            page.wait_for_selector(f"text='{SEREY_USER}'", state="visible", timeout=18000)
-            print("✅ ব্রাউজারে সফলভাবে লগইন কনফার্ম হয়েছে!", flush=True)
-            return True
-    except Exception as err:
-        print(f"লগইন ফর্ম নোটিশ: {err}", flush=True)
-
-    return False
-
-
 def post_with_browser(title, body):
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
@@ -194,22 +145,13 @@ def post_with_browser(title, body):
 
         page = context.new_page()
 
-        # নেটওয়ার্ক এপিআই রেসপন্স লাইভ প্রিন্ট করার লিসেনার
-        page.on("response", lambda res: print(f"📡 API [{res.status}]: {res.url[:70]}", flush=True) if "api" in res.url else None)
-
         try:
-            # ধাপ ১: সেরি হোমপেজে গিয়ে লগইন নিশ্চিত করা
-            print("🔗 সেরি হোমপেজে যাওয়া হচ্ছে...", flush=True)
-            page.goto("https://bengali.serey.io", timeout=45000, wait_until="domcontentloaded")
-            time.sleep(3)
-            dismiss_welcome_modal(page)
-            perform_browser_login(page)
-            dismiss_welcome_modal(page)
-
-            # ধাপ ২: নিশ্চিত লগইন অবস্থায় লেখার পেজে যাওয়া
+            # ধাপ ১: সরাসরি লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
+
+            # ব্যানার বন্ধ
             dismiss_welcome_modal(page)
 
             # এডিটর লোড হওয়া পর্যন্ত অপেক্ষা
@@ -243,7 +185,7 @@ def post_with_browser(title, body):
             )
             time.sleep(2)
 
-            # ধাপ ৩: নিচে স্ক্রোল করে প্রথম Publish বাটনে নিশ্চিত মাউস ক্লিক
+            # ধাপ ২: নিচে স্ক্রোল করে প্রথম Publish বাটনে নিশ্চিত মাউস ক্লিক
             print("🚀 প্রথম Publish বাটনে মাউস ক্লিক করা হচ্ছে...", flush=True)
             publish_btn = page.locator("button:has-text('Publish'):not([role='dialog'] button):not(.ant-modal button)").last
             publish_btn.scroll_into_view_if_needed()
@@ -251,12 +193,39 @@ def post_with_browser(title, body):
             publish_btn.click(force=True)
             time.sleep(3)
 
-            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপ আসার অপেক্ষা ও ক্লিক
-            print("⏳ ক্যাটাগরি মোডাল আসার অপেক্ষা করা হচ্ছে...", flush=True)
+            # ধাপ ৩: স্ক্রিনশট ১ অনুযায়ী Log In মোডাল চেক ও সরাসরি লগইন সম্পন্ন করা
+            user_field = page.locator("input[placeholder='Username'], input[name='username']").first
+            pass_field = page.locator("input[placeholder='Private Key or Password'], input[type='password']").first
+
+            if user_field.count() > 0 and user_field.is_visible():
+                print("🔑 সেরি Log In মোডাল দৃশ্যমান হয়েছে! ইউজারনেম ও পাসওয়ার্ড পূরণ করা হচ্ছে...", flush=True)
+                user_field.click(force=True)
+                user_field.press_sequentially(SEREY_USER, delay=35)
+                time.sleep(0.5)
+
+                pass_field.click(force=True)
+                pass_field.press_sequentially(SEREY_PASSWORD, delay=35)
+                time.sleep(0.5)
+
+                # নীল Log In বাটনে নিশ্চিত ক্লিক
+                print("🚀 নীল 'Log In' বাটনে ক্লিক করা হচ্ছে...", flush=True)
+                login_btn = page.locator("div[role='dialog'] button:has-text('Log In'), .ant-modal button:has-text('Log In'), button:has-text('Log In')").first
+                login_btn.click(force=True)
+                print("লগইন সম্পন্ন হওয়ার জন্য ৫ সেকেন্ড অপেক্ষা...", flush=True)
+                time.sleep(5)
+
+                # লগইন হওয়ার পর আবার নিচে প্রথম Publish বাটনে ক্লিক (ক্যাটাগরি মোডাল আনার জন্য)
+                print("🚀 লগইন শেষে আবার Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+                publish_btn.scroll_into_view_if_needed()
+                time.sleep(1)
+                publish_btn.click(force=True)
+                time.sleep(3)
+
+            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
+            print("🎯 ক্যাটাগরি মোডাল পপ-আপে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             page.wait_for_selector(".ant-modal:has-text('category'), div[role='dialog']:has-text('category'), .modal-publish-category, .ant-modal", state="visible", timeout=15000)
             time.sleep(1)
 
-            print("🎯 মোডাল পপ-আপে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             modal_publish_btn = page.locator(".ant-modal button:has-text('Publish'), div[role='dialog'] button:has-text('Publish')").last
             modal_publish_btn.scroll_into_view_if_needed()
             modal_publish_btn.click(force=True)
