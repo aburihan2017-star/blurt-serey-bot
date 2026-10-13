@@ -86,7 +86,6 @@ def get_post_details(permlink):
 
 
 def is_post_live_on_serey(title):
-    """সরাসরি প্রোফাইল এপিআই চেক করে পোস্টটি লাইভ হয়েছে কিনা নিশ্চিত করা"""
     try:
         url = f"https://global-api.serey.io/api/v2/serey-web/list-by-author?author={SEREY_USER}&limit=5&offset=0"
         r = requests.get(url, headers=BASE_HEADERS, timeout=12)
@@ -156,12 +155,12 @@ def post_with_browser(title, body):
 
                     submit_btn = page.locator("button[type='submit'], div[role='dialog'] button:has-text('Sign In'), button:has-text('Sign In')").last
                     submit_btn.click(force=True)
-                    time.sleep(4)
+                    time.sleep(5)
 
             # ধাপ ২: পোস্ট লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
-            time.sleep(3)
+            time.sleep(2)
 
             page.evaluate(
                 """() => {
@@ -170,72 +169,62 @@ def post_with_browser(title, body):
                 }"""
             )
 
+            # নিশ্চিতভাবে এডিটর ও টাইটেল লোড হওয়ার জন্য অপেক্ষা
+            print("⏳ এডিটর এবং ফর্ম লোড হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
+            page.wait_for_selector(".ql-editor, div[contenteditable='true']", state="visible", timeout=30000)
+            page.wait_for_selector("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]", state="visible", timeout=30000)
+            time.sleep(2)
+
             # টাইটেল বসানো
-            print("টাইটেল বসানো হচ্ছে...", flush=True)
-            page.evaluate(
-                f"""() => {{
-                    window.scrollTo(0, 0);
-                    const titleEl = document.querySelector("textarea[name='title'], input[name='title'], textarea[placeholder*='title' i], input[placeholder*='title' i], textarea");
-                    if (titleEl) {{
-                        titleEl.value = {json.dumps(title)};
-                        titleEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        titleEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                }}"""
-            )
+            print("✍️ টাইটেল বসানো হচ্ছে...", flush=True)
+            title_input = page.locator("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]").first
+            title_input.scroll_into_view_if_needed()
+            title_input.click()
+            title_input.fill(title)
             time.sleep(1)
 
             # এডিটরে বডি বসানো
-            print("কন্টেন্ট বসানো হচ্ছে...", flush=True)
+            print("✍️ ব্লগের কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
-            if editor.count() > 0:
-                editor.click(force=True)
-                page.evaluate(
-                    """([selector, html]) => {
-                        const el = document.querySelector(selector);
-                        if (el) { 
-                            el.innerHTML = html; 
-                            el.dispatchEvent(new Event('input', { bubbles: true })); 
-                        }
-                    }""",
-                    [".ql-editor", formatted_body]
-                )
+            editor.scroll_into_view_if_needed()
+            editor.click()
+            page.evaluate(
+                """([selector, html]) => {
+                    const el = document.querySelector(selector);
+                    if (el) { 
+                        el.innerHTML = html; 
+                        el.dispatchEvent(new Event('input', { bubbles: true })); 
+                    }
+                }""",
+                [".ql-editor", formatted_body]
+            )
             time.sleep(2)
 
-            # ধাপ ৩: নিচে স্ক্রোল করে সরাসরি DOM Click দিয়ে প্রথম Publish বাটনে ক্লিক
+            # ধাপ ৩: নিচে স্ক্রোল করে প্রথম Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            page.evaluate(
-                """() => {
-                    window.scrollTo(0, document.body.scrollHeight);
-                    const btns = Array.from(document.querySelectorAll('button'));
-                    const pubBtn = btns.find(b => b.textContent.trim() === 'Publish' && !b.closest('.ant-modal') && !b.closest('[role="dialog"]'));
-                    if (pubBtn) {
-                        pubBtn.click();
-                    }
-                }"""
-            )
-            time.sleep(3)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
 
-            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপের ফাইনাল Publish বাটনে ক্লিক
+            publish_btn = page.locator("button:has-text('Publish')").first
+            publish_btn.scroll_into_view_if_needed()
+            publish_btn.click()
+            
+            # মোডাল পপ-আপ আসার জন্য স্পষ্ট অপেক্ষা
+            print("⏳ ক্যাটাগরি মোডাল আসার অপেক্ষা করা হচ্ছে...", flush=True)
+            page.wait_for_selector("div[role='dialog'], .ant-modal, .ant-modal-content", state="visible", timeout=15000)
+            time.sleep(2)
+
+            # ধাপ ৪: মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
             print("🎯 মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            page.evaluate(
-                """() => {
-                    const modal = document.querySelector('.ant-modal, div[role="dialog"]');
-                    if (modal) {
-                        const modalBtns = Array.from(modal.querySelectorAll('button'));
-                        const finalBtn = modalBtns.find(b => b.textContent.trim() === 'Publish');
-                        if (finalBtn) {
-                            finalBtn.click();
-                        }
-                    }
-                }"""
-            )
+            modal_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
+            modal_btn.click()
 
-            # স্ক্রিনশট সেভ
-            time.sleep(4)
+            # সাবমিটের পর পেজ রিডাইরেক্টের অপেক্ষা
+            print("⏳ পোস্ট লাইভ হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
+            time.sleep(6)
             page.screenshot(path="serey_post_result.png")
 
-            # ধাপ ৫: সরাসরি প্রোফাইল ডাটাবেজ চেক করে শতভাগ নিশ্চিত হওয়া
+            # ধাপ ৫: সরাসরি প্রোফাইল ডাটাবেজ চেক করে নিশ্চিত হওয়া
             print("🔍 সেরি প্রোফাইল ডাটাবেজে পোস্ট লাইভ হয়েছে কিনা চেক করা হচ্ছে...", flush=True)
             for wait_round in range(1, 6):
                 time.sleep(4)
@@ -245,7 +234,6 @@ def post_with_browser(title, body):
                     return True
                 print(f"অপেক্ষা করা হচ্ছে ({wait_round}/5)...", flush=True)
 
-            # যদি রিডাইরেক্ট হয়ে প্রোফাইল পেজে চলে যায়
             if f"/authors/{SEREY_USER.lower()}" in page.url.lower() and "write" not in page.url.lower():
                 print(f"🎉🎉 ব্রাউজার সফলভাবে পোস্ট পেজে রিডাইরেক্ট হয়েছে: {title}", flush=True)
                 browser.close()
@@ -306,12 +294,12 @@ def main():
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
         data.setdefault("timestamps", []).append(current_time)
-        print("ডাটা সেভ করা হয়েছে।", flush=True)
+        print("ডাটা সেভ করা হয়েছে।")
     else:
         data["queue"].append(permlink_to_post)
 
     save_data(data)
-    print("\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।", flush=True)
+    print("\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।")
 
 
 if __name__ == "__main__":
