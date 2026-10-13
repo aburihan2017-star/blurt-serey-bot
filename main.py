@@ -100,26 +100,6 @@ def is_post_live_on_serey(title):
     return False
 
 
-def dismiss_welcome_modal(page):
-    try:
-        close_btn = page.locator("button:has-text('Close'), .no-cookie-notice-overlay button:has-text('Close')").first
-        if close_btn.count() > 0 and close_btn.is_visible():
-            print("🍪 'Welcome to Serey' ব্যানার বন্ধ করা হচ্ছে...", flush=True)
-            close_btn.click(force=True)
-            time.sleep(1)
-    except Exception:
-        pass
-
-    page.evaluate(
-        """() => {
-            document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]').forEach(el => el.remove());
-            document.body.style.overflow = 'auto';
-            localStorage.setItem('serey_no_cookie_notice_seen', 'true');
-        }"""
-    )
-    time.sleep(1)
-
-
 def post_with_browser(title, body):
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
@@ -143,18 +123,31 @@ def post_with_browser(title, body):
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         )
 
+        # ১. ব্রাউজার ইঞ্জিন লোড হওয়ার আগেই কুকি ব্যানার ব্লক করে দেওয়া (স্থায়ী ফিক্স)
+        context.add_init_script("""
+            try {
+                localStorage.setItem('serey_no_cookie_notice_seen', 'true');
+            } catch(e) {}
+        """)
+
         page = context.new_page()
 
         try:
-            # ধাপ ১: সরাসরি লেখার পেজে যাওয়া
+            # ধাপ ১: সরাসরি পোস্ট লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
 
-            # ব্যানার বন্ধ
-            dismiss_welcome_modal(page)
+            # যদি কোনো ব্যানার বা ক্লোজ বাটন থাকে তা ক্লিক ও রিমুভ করা
+            page.evaluate("""() => {
+                const closeBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Close');
+                if (closeBtn) closeBtn.click();
+                document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie"]').forEach(e => e.remove());
+                document.body.style.overflow = 'auto';
+            }""")
+            time.sleep(1)
 
-            # এডিটর লোড হওয়া পর্যন্ত অপেক্ষা
+            # ধাপ ২: এডিটর ও ফর্ম লোড হওয়া পর্যন্ত অপেক্ষা
             print("⏳ এডিটর এবং ফর্ম লোড হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
             page.wait_for_selector(".ql-editor, div[contenteditable='true']", state="visible", timeout=30000)
             page.wait_for_selector("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]", state="visible", timeout=30000)
@@ -185,20 +178,27 @@ def post_with_browser(title, body):
             )
             time.sleep(2)
 
-            # ধাপ ২: নিচে স্ক্রোল করে প্রথম Publish বাটনে নিশ্চিত মাউস ক্লিক
-            print("🚀 প্রথম Publish বাটনে মাউস ক্লিক করা হচ্ছে...", flush=True)
-            publish_btn = page.locator("button:has-text('Publish'):not([role='dialog'] button):not(.ant-modal button)").last
-            publish_btn.scroll_into_view_if_needed()
-            time.sleep(1)
-            publish_btn.click(force=True)
+            # ধাপ ৩: প্রথম Publish বাটনে ক্লিক করা
+            print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            page.evaluate("""() => {
+                const closeBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Close');
+                if (closeBtn) closeBtn.click();
+                document.querySelectorAll('.no-cookie-notice-overlay').forEach(e => e.remove());
+                document.body.style.overflow = 'auto';
+
+                window.scrollTo(0, document.body.scrollHeight);
+                const btns = Array.from(document.querySelectorAll('button'));
+                const pubBtn = btns.find(b => b.textContent.trim() === 'Publish' && !b.closest('.ant-modal') && !b.closest('[role="dialog"]'));
+                if (pubBtn) pubBtn.click();
+            }""")
             time.sleep(3)
 
-            # ধাপ ৩: স্ক্রিনশট ১ অনুযায়ী Log In মোডাল চেক ও সরাসরি লগইন সম্পন্ন করা
+            # ধাপ ৪: যদি Log In মোডাল সামনে আসে (স্ক্রিনশটের সেই মোডাল পূরণ করা)
             user_field = page.locator("input[placeholder='Username'], input[name='username']").first
             pass_field = page.locator("input[placeholder='Private Key or Password'], input[type='password']").first
 
             if user_field.count() > 0 and user_field.is_visible():
-                print("🔑 সেরি Log In মোডাল দৃশ্যমান হয়েছে! ইউজারনেম ও পাসওয়ার্ড পূরণ করা হচ্ছে...", flush=True)
+                print("🔑 সেরি Log In মোডাল সামনে এসেছে! ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
                 user_field.click(force=True)
                 user_field.press_sequentially(SEREY_USER, delay=35)
                 time.sleep(0.5)
@@ -207,35 +207,52 @@ def post_with_browser(title, body):
                 pass_field.press_sequentially(SEREY_PASSWORD, delay=35)
                 time.sleep(0.5)
 
-                # নীল Log In বাটনে নিশ্চিত ক্লিক
+                # নীল Log In বাটনে ক্লিক
                 print("🚀 নীল 'Log In' বাটনে ক্লিক করা হচ্ছে...", flush=True)
-                login_btn = page.locator("div[role='dialog'] button:has-text('Log In'), .ant-modal button:has-text('Log In'), button:has-text('Log In')").first
-                login_btn.click(force=True)
-                print("লগইন সম্পন্ন হওয়ার জন্য ৫ সেকেন্ড অপেক্ষা...", flush=True)
+                page.evaluate("""() => {
+                    const modal = document.querySelector('.ant-modal, div[role="dialog"]');
+                    if (modal) {
+                        const btns = Array.from(modal.querySelectorAll('button'));
+                        const logBtn = btns.find(b => b.textContent.trim() === 'Log In');
+                        if (logBtn) logBtn.click();
+                    }
+                }""")
                 time.sleep(5)
 
-                # লগইন হওয়ার পর আবার নিচে প্রথম Publish বাটনে ক্লিক (ক্যাটাগরি মোডাল আনার জন্য)
-                print("🚀 লগইন শেষে আবার Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-                publish_btn.scroll_into_view_if_needed()
-                time.sleep(1)
-                publish_btn.click(force=True)
+                # লগইন শেষে আবার Publish বাটনে ক্লিক
+                print("🚀 লগইন শেষে দ্বিতীয়বার Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+                page.evaluate("""() => {
+                    window.scrollTo(0, document.body.scrollHeight);
+                    const btns = Array.from(document.querySelectorAll('button'));
+                    const pubBtn = btns.find(b => b.textContent.trim() === 'Publish' && !b.closest('.ant-modal') && !b.closest('[role="dialog"]'));
+                    if (pubBtn) pubBtn.click();
+                }""")
                 time.sleep(3)
 
-            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
-            print("🎯 ক্যাটাগরি মোডাল পপ-আপে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            page.wait_for_selector(".ant-modal:has-text('category'), div[role='dialog']:has-text('category'), .modal-publish-category, .ant-modal", state="visible", timeout=15000)
+            # ধাপ ৫: ক্যাটাগরি মোডালের ফাইনাল নীল Publish বাটনে ক্লিক
+            print("🎯 ক্যাটাগরি মোডালের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            page.wait_for_selector("div[role='dialog'], .ant-modal", state="visible", timeout=15000)
             time.sleep(1)
 
-            modal_publish_btn = page.locator(".ant-modal button:has-text('Publish'), div[role='dialog'] button:has-text('Publish')").last
-            modal_publish_btn.scroll_into_view_if_needed()
-            modal_publish_btn.click(force=True)
+            page.evaluate("""() => {
+                const modal = document.querySelector('div[role="dialog"], .ant-modal');
+                if (modal) {
+                    const btns = Array.from(modal.querySelectorAll('button'));
+                    const finalBtn = btns.find(b => b.textContent.trim() === 'Publish');
+                    if (finalBtn) {
+                        finalBtn.click();
+                    } else if (btns.length > 0) {
+                        btns[btns.length - 1].click();
+                    }
+                }
+            }""")
 
             # সাবমিটের পর পেজ আপডেট ও স্ক্রিনশট
             print("⏳ পোস্ট লাইভ হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
-            time.sleep(7)
+            time.sleep(6)
             page.screenshot(path="serey_post_result.png")
 
-            # ধাপ ৫: সরাসরি প্রোফাইল ডাটাবেজ চেক করে শতভাগ নিশ্চিত হওয়া
+            # ধাপ ৬: সরাসরি প্রোফাইল ডাটাবেজ চেক করে শতভাগ নিশ্চিত হওয়া
             print("🔍 সেরি প্রোফাইল ডাটাবেজে পোস্ট লাইভ হয়েছে কিনা চেক করা হচ্ছে...", flush=True)
             for wait_round in range(1, 6):
                 time.sleep(4)
