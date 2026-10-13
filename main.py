@@ -21,6 +21,11 @@ DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 72000
 
+BASE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+}
+
 
 def blurt_call(method, params):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
@@ -81,7 +86,6 @@ def get_post_details(permlink):
 
 
 def post_with_browser(title, body):
-    """আসল ক্রোম ব্রাউজারের মাধ্যমে স্বয়ংক্রিয় লগইন ও পোস্ট পাবলিশ"""
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
     formatted_body = body
@@ -107,7 +111,7 @@ def post_with_browser(title, body):
         page = context.new_page()
 
         try:
-            # ধাপ ১: সেরি হোমপেজে গিয়ে কুকি নোটিস হ্যান্ডেল করা
+            # ধাপ ১: সেরি হোমপেজে গিয়ে কুকি ব্যানার হ্যান্ডেল করা
             print("🔗 সেরি হোমপেজে যাওয়া হচ্ছে...", flush=True)
             page.goto("https://bengali.serey.io", timeout=45000, wait_until="domcontentloaded")
             time.sleep(2)
@@ -120,35 +124,37 @@ def post_with_browser(title, body):
                 }"""
             )
 
-            # ধাপ ২: ব্রাউজারে লগইন নিশ্চিত করা
-            print("🔑 ব্রাউজারে সাইন-ইন বা লগইন চেক করা হচ্ছে...", flush=True)
+            # ধাপ ২: ব্রাউজারের মাধ্যমে আসল লগইন সম্পন্ন করা
+            print("🔑 ব্রাউজারে লগইন বাটন খোঁজা হচ্ছে...", flush=True)
+            login_btn = page.locator("button:has-text('Sign up / Log in'), button:has-text('Log in'), button:has-text('Sign In'), a:has-text('Sign up / Log in'), a:has-text('Log in')").first
             
-            # সাইটের লগইন বাটনে ক্লিক
-            signin_btn = page.locator("button:has-text('Sign In'), button:has-text('Log in'), a:has-text('Sign In'), a:has-text('Log in')").first
-            if signin_btn.count() > 0 and signin_btn.is_visible():
+            if login_btn.count() > 0 and login_btn.is_visible():
                 print("লগইন বাটনে ক্লিক করা হচ্ছে...", flush=True)
-                signin_btn.click()
+                login_btn.click(force=True)
                 time.sleep(2)
 
-            # ইউজারনেম ও পাসওয়ার্ড পূরণ
-            user_input = page.locator("input[placeholder*='sername' i], input[name='username'], input[type='text']").first
-            pass_input = page.locator("input[type='password']").first
+                # লগইন ইনপুট পূরণ
+                user_input = page.locator("input[placeholder*='sername' i], input[name='username'], input[type='text']").last
+                pass_input = page.locator("input[type='password']").last
 
-            if user_input.count() > 0 and pass_input.count() > 0:
-                print("ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
-                user_input.fill(SEREY_USER)
-                pass_input.fill(SEREY_PASSWORD)
-                time.sleep(1)
-                login_submit = page.locator("button[type='submit'], button:has-text('Sign In'), button:has-text('Login')").last
-                login_submit.click()
-                time.sleep(4)
+                if user_input.count() > 0 and pass_input.count() > 0:
+                    print("ইউজারনেম ও পাসওয়ার্ড দিয়ে সাইন-ইন করা হচ্ছে...", flush=True)
+                    user_input.fill(SEREY_USER, force=True)
+                    pass_input.fill(SEREY_PASSWORD, force=True)
+                    time.sleep(1)
+
+                    # সাইন-ইন বাটন ক্লিক
+                    submit_btn = page.locator("button[type='submit'], div[role='dialog'] button:has-text('Sign In'), div[role='dialog'] button:has-text('Login'), button:has-text('Sign In')").last
+                    submit_btn.click(force=True)
+                    print("লগইন সম্পন্ন হওয়ার জন্য অপেক্ষা করা হচ্ছে...", flush=True)
+                    time.sleep(5)
 
             # ধাপ ৩: পোস্ট লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
 
-            # কুকি ওভারলে রিমুভ
+            # ব্যানার ক্লিয়ার
             page.evaluate(
                 """() => {
                     const overlays = document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]');
@@ -162,7 +168,7 @@ def post_with_browser(title, body):
             title_input.fill(title, force=True)
             time.sleep(1)
 
-            # কন্টেন্ট/এডিটরে লেখা বসানো
+            # এডিটরে বডি বসানো
             print("কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
@@ -179,7 +185,7 @@ def post_with_browser(title, body):
                 )
             time.sleep(2)
 
-            # ধাপ ৪: প্রথম Publish বাটনে ক্লিক
+            # ধাপ ৪: নিচে থাকা প্রথম Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             publish_btn = page.locator("button:has-text('Publish')").last
             publish_btn.scroll_into_view_if_needed()
@@ -208,12 +214,11 @@ def post_with_browser(title, body):
             # ধাপ ৭: পোস্ট নিশ্চিত হওয়া
             print("⏳ পোস্ট লাইভ হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
             success = False
-            for i in range(15):
+            for _ in range(12):
                 time.sleep(2)
                 current_url = page.url.lower()
                 page_text = page.content().lower()
 
-                # কেবল সফলতার নির্দিষ্ট মেসেজ থাকলে সফল ধরা হবে
                 if "successfully posted your article" in page_text or "post updated successfully" in page_text:
                     success = True
                     break
@@ -288,7 +293,6 @@ def main():
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।", flush=True)
     else:
-        # সফল না হলে কিউতে ফেরত রাখা যাতে নষ্ট না হয়
         data["queue"].append(permlink_to_post)
 
     save_data(data)
