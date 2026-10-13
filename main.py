@@ -21,11 +21,6 @@ DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 72000
 
-BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-}
-
 
 def blurt_call(method, params):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
@@ -85,20 +80,8 @@ def get_post_details(permlink):
     return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
 
 
-def get_serey_auth_token():
-    login_url = "https://global-api.serey.io/api/v2/auth/login"
-    payload = {"username": SEREY_USER, "password": SEREY_PASSWORD}
-    try:
-        r = requests.post(login_url, json=payload, headers=BASE_HEADERS, timeout=25)
-        if r.status_code in [200, 201]:
-            d = r.json()
-            return d.get("token") or d.get("accessToken") or (d.get("data", {}).get("token") if isinstance(d.get("data"), dict) else None)
-    except Exception:
-        pass
-    return None
-
-
-def post_with_browser(title, body, token):
+def post_with_browser(title, body):
+    """আসল ক্রোম ব্রাউজারের মাধ্যমে স্বয়ংক্রিয় লগইন ও পোস্ট পাবলিশ"""
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
     formatted_body = body
@@ -124,31 +107,48 @@ def post_with_browser(title, body, token):
         page = context.new_page()
 
         try:
-            print("🔗 সেরি রাইট পেজে যাওয়া হচ্ছে...", flush=True)
-            page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
+            # ধাপ ১: সেরি হোমপেজে গিয়ে কুকি নোটিস হ্যান্ডেল করা
+            print("🔗 সেরি হোমপেজে যাওয়া হচ্ছে...", flush=True)
+            page.goto("https://bengali.serey.io", timeout=45000, wait_until="domcontentloaded")
             time.sleep(2)
 
-            token_js = token if token else ""
             page.evaluate(
-                f"""() => {{
+                """() => {
                     localStorage.setItem('serey_no_cookie_notice_seen', 'true');
-                    if ('{token_js}') {{
-                        localStorage.setItem('token', '{token_js}');
-                        localStorage.setItem('accessToken', '{token_js}');
-                    }}
-                }}"""
+                    const overlays = document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]');
+                    overlays.forEach(el => el.remove());
+                }"""
             )
 
-            if token:
-                context.add_cookies([
-                    {"name": "token", "value": token, "domain": ".serey.io", "path": "/"},
-                    {"name": "accessToken", "value": token, "domain": ".serey.io", "path": "/"},
-                ])
+            # ধাপ ২: ব্রাউজারে লগইন নিশ্চিত করা
+            print("🔑 ব্রাউজারে সাইন-ইন বা লগইন চেক করা হচ্ছে...", flush=True)
+            
+            # সাইটের লগইন বাটনে ক্লিক
+            signin_btn = page.locator("button:has-text('Sign In'), button:has-text('Log in'), a:has-text('Sign In'), a:has-text('Log in')").first
+            if signin_btn.count() > 0 and signin_btn.is_visible():
+                print("লগইন বাটনে ক্লিক করা হচ্ছে...", flush=True)
+                signin_btn.click()
+                time.sleep(2)
 
-            page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
+            # ইউজারনেম ও পাসওয়ার্ড পূরণ
+            user_input = page.locator("input[placeholder*='sername' i], input[name='username'], input[type='text']").first
+            pass_input = page.locator("input[type='password']").first
+
+            if user_input.count() > 0 and pass_input.count() > 0:
+                print("ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
+                user_input.fill(SEREY_USER)
+                pass_input.fill(SEREY_PASSWORD)
+                time.sleep(1)
+                login_submit = page.locator("button[type='submit'], button:has-text('Sign In'), button:has-text('Login')").last
+                login_submit.click()
+                time.sleep(4)
+
+            # ধাপ ৩: পোস্ট লেখার পেজে যাওয়া
+            print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
+            page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
 
-            # ওভারলে রিমুভ
+            # কুকি ওভারলে রিমুভ
             page.evaluate(
                 """() => {
                     const overlays = document.querySelectorAll('.no-cookie-notice-overlay, [class*="cookie-notice"]');
@@ -156,33 +156,14 @@ def post_with_browser(title, body, token):
                 }"""
             )
 
-            # লগইন ফিল্ড চেক
-            if "login" in page.url or page.locator("input[type='password']").count() > 0:
-                print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
-                user_input = page.locator("input[type='text'], input[name='username'], input[placeholder*='sername' i]").first
-                pass_input = page.locator("input[type='password']").first
-                if user_input.count() > 0 and pass_input.count() > 0:
-                    user_input.fill(SEREY_USER)
-                    pass_input.fill(SEREY_PASSWORD)
-                    time.sleep(1)
-                    page.locator("button[type='submit'], button:has-text('Login'), button:has-text('Sign In')").first.click()
-                    page.wait_for_load_state("networkidle", timeout=20000)
-                    time.sleep(3)
-                    page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
-                    time.sleep(3)
-
-            print("✍️ টাইটেল ও পোস্টের বিষয়বস্তু পেস্ট করা হচ্ছে...", flush=True)
-
-            # ১. টাইটেল
-            title_input = page.locator("textarea[name='title'], input[name='title'], input[placeholder*='itle' i], textarea[placeholder*='itle' i]").first
-            if title_input.count() > 0:
-                title_input.fill(title, force=True)
-            else:
-                page.locator("input[type='text']").first.fill(title, force=True)
-
+            # টাইটেল পূরণ
+            print("টাইটেল বসানো হচ্ছে...", flush=True)
+            title_input = page.locator("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]").first
+            title_input.fill(title, force=True)
             time.sleep(1)
 
-            # ২. এডিটর
+            # কন্টেন্ট/এডিটরে লেখা বসানো
+            print("কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
                 editor.click(force=True)
@@ -198,61 +179,65 @@ def post_with_browser(title, body, token):
                 )
             time.sleep(2)
 
-            # ৩. প্রথম Publish বাটনে ক্লিক
+            # ধাপ ৪: প্রথম Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             publish_btn = page.locator("button:has-text('Publish')").last
             publish_btn.scroll_into_view_if_needed()
             publish_btn.click(force=True)
             time.sleep(3)
 
-            # ৪. মোডাল পপ-আপে ক্যাটাগরি নির্বাচন নিশ্চিত করা (News)
+            # ধাপ ৫: মোডালে News ক্যাটাগরি কনফার্ম করা
             try:
-                cat_select = page.locator("div[role='dialog'] .ant-select, .ant-modal .ant-select").first
-                if cat_select.count() > 0:
-                    cat_select.click()
+                cat_dropdown = page.locator("div[role='dialog'] .ant-select, .ant-modal .ant-select").first
+                if cat_dropdown.count() > 0:
+                    cat_dropdown.click(force=True)
                     time.sleep(1)
-                    page.locator(".ant-select-item-option:has-text('News')").first.click()
+                    page.locator(".ant-select-item-option:has-text('News')").first.click(force=True)
                     time.sleep(1)
             except Exception:
                 pass
 
-            # ৫. ফাইনাল নীল Publish বাটনে ক্লিক
-            print("🎯 মোডাল কনফার্ম করে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            # ধাপ ৬: মোডালের ফাইনাল নীল Publish বাটনে ক্লিক
+            print("🎯 মোডালের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
             if modal_publish_btn.count() > 0:
                 modal_publish_btn.click(force=True)
             else:
                 page.locator("button:has-text('Publish')").last.click(force=True)
 
-            # ৬. সফলতার অপেক্ষা ও পেজ ভেরিফিকেশন
-            print("⏳ পোস্ট সফল হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
+            # ধাপ ৭: পোস্ট নিশ্চিত হওয়া
+            print("⏳ পোস্ট লাইভ হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
             success = False
-            for _ in range(12):
+            for i in range(15):
                 time.sleep(2)
+                current_url = page.url.lower()
                 page_text = page.content().lower()
-                if (
-                    "successfully" in page_text
-                    or "success" in page_text
-                    or "/authors/" in page.url
-                    or "article" in page_text
-                ):
+
+                # কেবল সফলতার নির্দিষ্ট মেসেজ থাকলে সফল ধরা হবে
+                if "successfully posted your article" in page_text or "post updated successfully" in page_text:
                     success = True
                     break
 
-            if SEREY_USER in page.url and "write" not in page.url:
-                success = True
+                if f"/authors/{SEREY_USER.lower()}" in current_url and "write" not in current_url:
+                    success = True
+                    break
 
             # স্ক্রিনশট সেভ রাখা
             page.screenshot(path="serey_post_result.png")
 
             if success:
-                print(f"🎉🎉 ব্রাউজার অটোমেশন দিয়ে পোস্টটি নিশ্চিতভাবে লাইভ হয়েছে: {title}", flush=True)
+                print(f"🎉🎉 পোস্টটি ১০০% নিশ্চিতভাবে সেরি প্রোফাইলে লাইভ হয়েছে: {title}", flush=True)
                 browser.close()
                 return True
+            else:
+                print("❌ পোস্ট পাবলিশ হয়নি বা নোটিফিকেশন মেলেনি (স্ক্রিনশট সংরক্ষণ করা হয়েছে)।", flush=True)
 
-            print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে কিন্তু কনফার্মেশন স্পষ্ট নয়।", flush=True)
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
+            try:
+                page.screenshot(path="serey_post_result.png")
+            except Exception:
+                pass
         finally:
             browser.close()
 
@@ -295,16 +280,15 @@ def main():
     title = post_info.get("title", "")
     body = post_info.get("body", "")
 
-    token = get_serey_auth_token()
-
     print(f"\nপ্রসেস করা হচ্ছে: {title}", flush=True)
-    success = post_with_browser(title, body, token)
+    success = post_with_browser(title, body)
 
     if success:
         data.setdefault("posted", []).append(permlink_to_post)
         data.setdefault("timestamps", []).append(current_time)
         print("ডাটা সেভ করা হয়েছে।", flush=True)
     else:
+        # সফল না হলে কিউতে ফেরত রাখা যাতে নষ্ট না হয়
         data["queue"].append(permlink_to_post)
 
     save_data(data)
