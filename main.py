@@ -56,7 +56,7 @@ def save_data(data):
 
 def fetch_blurt_posts(posted_set):
     """ব্লার্ট লাইভ নোড থেকে aburihan1 এর ১ বছর আগের পোস্ট সংগ্রহ"""
-    print("📡 ব্লার্ট লাইভ নোড থেকে পোস্ট খোঁজা হচ্ছে...")
+    print("📡 ব্লার্ট লাইভ নোড থেকে পোস্ট খোঁজা হচ্ছে...", flush=True)
     one_year_ago = datetime.utcnow() - timedelta(days=365)
     before_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -77,7 +77,7 @@ def fetch_blurt_posts(posted_set):
             plink = p.get("permlink")
             if plink and plink not in posted_set and plink not in new_permlinks:
                 new_permlinks.append(plink)
-        print(f"✅ ব্লার্ট থেকে {len(new_permlinks)}টি পোস্ট পাওয়া গেছে!")
+        print(f"✅ ব্লার্ট থেকে {len(new_permlinks)}টি পোস্ট পাওয়া গেছে!", flush=True)
         return new_permlinks
     return []
 
@@ -101,10 +101,9 @@ def get_serey_auth_token():
 
 
 def post_with_browser(title, body, token):
-    """ভার্চুয়াল ব্রাউজারের মাধ্যমে সরাসরি সেরি পেজে পোস্ট করা"""
-    print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...")
+    """ভার্চুয়াল ক্রোম ব্রাউজারের মাধ্যমে সরাসরি সেরি পেজে পোস্ট করা"""
+    print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
-    # HTML ফরম্যাটিং
     formatted_body = body
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
@@ -128,11 +127,11 @@ def post_with_browser(title, body, token):
         page = context.new_page()
 
         try:
-            print("🔗 সেরি রাইট পেজে যাওয়া হচ্ছে...")
+            print("🔗 সেরি রাইট পেজে যাওয়া হচ্ছে...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
 
-            # লগইন টোকেন ব্রাউজার স্টোরেজ ও কুকিতে ইনজেক্ট করা
+            # টোকেন ইনজেক্ট
             if token:
                 page.evaluate(
                     f"""() => {{
@@ -145,13 +144,12 @@ def post_with_browser(title, body, token):
                     {"name": "accessToken", "value": token, "domain": ".serey.io", "path": "/"},
                 ])
 
-            # পেজ রিলোড নিশ্চিত করতে
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
-            time.sleep(4)
+            time.sleep(3)
 
-            # যদি লগইন পেজে রিডাইরেক্ট করে থাকে, তবে ব্রাউজারে লগইন করা
+            # লগইন ফিল্ড থাকলে স্বয়ংক্রিয় লগইন
             if "login" in page.url or page.locator("input[type='password']").count() > 0:
-                print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...")
+                print("🔑 ব্রাউজারে লগইন সম্পন্ন করা হচ্ছে...", flush=True)
                 user_input = page.locator("input[type='text'], input[name='username'], input[placeholder*='sername' i]").first
                 pass_input = page.locator("input[type='password']").first
                 if user_input.count() > 0 and pass_input.count() > 0:
@@ -164,24 +162,22 @@ def post_with_browser(title, body, token):
                     page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="networkidle")
                     time.sleep(3)
 
-            print("✍️ টাইটেল ও পোস্টের বিষয়বস্তু পেস্ট করা হচ্ছে...")
+            print("✍️ টাইটেল ও পোস্টের বিষয়বস্তু পেস্ট করা হচ্ছে...", flush=True)
 
-            # ১. টাইটেল ইনপুট
+            # ১. টাইটেল
             title_input = page.locator("input[placeholder*='itle' i], input[name='title'], textarea[placeholder*='itle' i]").first
             if title_input.count() > 0:
                 title_input.click()
                 title_input.fill(title)
             else:
-                # ফলব্যাক হিসেবে প্রথম টেক্সট ইনপুট
                 page.locator("input[type='text']").first.fill(title)
 
             time.sleep(1)
 
-            # ২. Quill এডিটরে বডি বসানো
+            # ২. এডিটর
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
                 editor.click()
-                # কন্টেন্ট সরাসরি এডিটরে ইনজেক্ট
                 page.evaluate(
                     """([selector, html]) => {
                         const el = document.querySelector(selector);
@@ -191,21 +187,20 @@ def post_with_browser(title, body, token):
                 )
             time.sleep(2)
 
-            # ৩. নিচে থাকা প্রথম "Publish" বাটনে ক্লিক (যা ক্যাটাগরি মোডাল খোলে)
-            print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...")
+            # ৩. প্রথম Publish বাটনে ক্লিক
+            print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             publish_btn = page.locator("button:has-text('Publish')").last
             publish_btn.scroll_into_view_if_needed()
             publish_btn.click()
             time.sleep(3)
 
-            # ৪. মোডাল পপ-আপের নীল "Publish" বাটনে ক্লিক
-            print("🎯 মোডাল কনফার্ম করে ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...")
-            # মোডালের ভেতরের নীল বাটন
+            # ৪. মোডালের ফাইনাল Publish বাটনে ক্লিক
+            print("🎯 মোডাল কনফার্ম করে ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish'), button:has-text('Publish')").last
             modal_publish_btn.click()
 
-            # ৫. সফলতার নোটিফিকেশন চেক (Success toast / redirect)
-            print("⏳ পোস্ট সফল হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...")
+            # ৫. সফলতার নোটিফিকেশন চেক
+            print("⏳ পোস্ট সফল হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
             for _ in range(15):
                 time.sleep(2)
                 page_text = page.content().lower()
@@ -215,19 +210,17 @@ def post_with_browser(title, body, token):
                     or "/authors/" in page.url
                     or "article" in page_text
                 ):
-                    print(f"🎉🎉 ব্রাউজার অটোমেশন দিয়ে পোস্টটি ১০০% সফলভাবে লাইভ হয়েছে: {title}")
+                    print(f"🎉🎉 ব্রাউজার অটোমেশন দিয়ে পোস্টটি ১০০% সফলভাবে লাইভ হয়েছে: {title}", flush=True)
                     browser.close()
                     return True
 
-            # পেজ ইউআরএল পরিবর্তিত হয়ে লেখকের প্রোফাইলে গেলে সফল
             if SEREY_USER in page.url and "write" not in page.url:
-                print(f"🎉🎉 পোস্ট সফলভাবে লাইভ হয়ে প্রোফাইল পেজে চলে গেছে: {title}")
+                print(f"🎉🎉 পোস্ট সফলভাবে লাইভ হয়ে প্রোফাইল পেজে চলে গেছে: {title}", flush=True)
                 browser.close()
                 return True
 
-            print("সতর্কতা: পাবলিশ বাটন চাপার পর কনফার্মেশন পাওয়া যায়নি।")
         except Exception as e:
-            print(f"❌ ব্রাউজার অটোমেশন এরর: {e}")
+            print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
         finally:
             browser.close()
 
@@ -235,19 +228,17 @@ def post_with_browser(title, body, token):
 
 
 def main():
-    print("বট চালু হচ্ছে...")
+    print("বট চালু হচ্ছে...", flush=True)
     if not SEREY_PASSWORD:
-        print("ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!")
+        print("ত্রুটি: SEREY_POSTING_KEY পাওয়া যায়নি!", flush=True)
         return
 
     data = load_data()
-
-    # দৈনিক সীমা চেক
     current_time = time.time()
     data["timestamps"] = [t for t in data.get("timestamps", []) if current_time - t < DAY_IN_SECONDS]
 
     if len(data["timestamps"]) >= MAX_DAILY_POSTS:
-        print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।")
+        print(f"আজকের দৈনিক সীমা ({MAX_DAILY_POSTS} টি পোস্ট) পূর্ণ হয়েছে।", flush=True)
         return
 
     posted_set = set(data.get("posted", []))
@@ -258,7 +249,7 @@ def main():
         save_data(data)
 
     if not data["queue"]:
-        print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।")
+        print("পোস্ট করার মতো কোনো নতুন পোস্ট পাওয়া যায়নি।", flush=True)
         return
 
     permlink_to_post = data["queue"].pop(0)
@@ -266,4 +257,27 @@ def main():
 
     if not post_info or "title" not in post_info:
         data.setdefault("posted", []).append(permlink_to_post)
-        save_d
+        save_data(data)
+        return
+
+    title = post_info.get("title", "")
+    body = post_info.get("body", "")
+
+    token = get_serey_auth_token()
+
+    print(f"\nপ্রসেস করা হচ্ছে: {title}", flush=True)
+    success = post_with_browser(title, body, token)
+
+    if success:
+        data.setdefault("posted", []).append(permlink_to_post)
+        data.setdefault("timestamps", []).append(current_time)
+        print("ডাটা সেভ করা হয়েছে।", flush=True)
+    else:
+        data["queue"].append(permlink_to_post)
+
+    save_data(data)
+    print("\nপ্রক্রিয়া সম্পূর্ণ হয়েছে।", flush=True)
+
+
+if __name__ == "__main__":
+    main()
