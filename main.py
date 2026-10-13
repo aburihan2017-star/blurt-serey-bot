@@ -21,6 +21,11 @@ DATA_FILE = "automation_data.json"
 MAX_DAILY_POSTS = 2
 DAY_IN_SECONDS = 72000
 
+BASE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+}
+
 
 def blurt_call(method, params):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
@@ -80,6 +85,22 @@ def get_post_details(permlink):
     return blurt_call("condenser_api.get_content", [BLURT_USER, permlink])
 
 
+def is_post_live_on_serey(title):
+    """সরাসরি প্রোফাইল এপিআই চেক করে পোস্টটি লাইভ হয়েছে কিনা নিশ্চিত করা"""
+    try:
+        url = f"https://global-api.serey.io/api/v2/serey-web/list-by-author?author={SEREY_USER}&limit=5&offset=0"
+        r = requests.get(url, headers=BASE_HEADERS, timeout=12)
+        if r.status_code == 200:
+            posts = r.json().get("posts", [])
+            for p in posts:
+                p_title = p.get("title", "")
+                if title.strip().lower() in p_title.strip().lower() or p_title.strip().lower() in title.strip().lower():
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def post_with_browser(title, body):
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
@@ -106,7 +127,7 @@ def post_with_browser(title, body):
         page = context.new_page()
 
         try:
-            # ধাপ ১: সেরি হোমপেজে গিয়ে লগইন করা
+            # ধাপ ১: সেরি হোমপেজে গিয়ে লগইন নিশ্চিত করা
             print("🔗 সেরি হোমপেজে যাওয়া হচ্ছে...", flush=True)
             page.goto("https://bengali.serey.io", timeout=45000, wait_until="domcontentloaded")
             time.sleep(2)
@@ -135,7 +156,7 @@ def post_with_browser(title, body):
 
                     submit_btn = page.locator("button[type='submit'], div[role='dialog'] button:has-text('Sign In'), button:has-text('Sign In')").last
                     submit_btn.click(force=True)
-                    time.sleep(5)
+                    time.sleep(4)
 
             # ধাপ ২: পোস্ট লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
@@ -151,11 +172,20 @@ def post_with_browser(title, body):
 
             # টাইটেল বসানো
             print("টাইটেল বসানো হচ্ছে...", flush=True)
-            title_input = page.locator("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]").first
-            title_input.fill(title, force=True)
+            page.evaluate(
+                f"""() => {{
+                    window.scrollTo(0, 0);
+                    const titleEl = document.querySelector("textarea[name='title'], input[name='title'], textarea[placeholder*='title' i], input[placeholder*='title' i], textarea");
+                    if (titleEl) {{
+                        titleEl.value = {json.dumps(title)};
+                        titleEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        titleEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                }}"""
+            )
             time.sleep(1)
 
-            # এডিটরে কন্টেন্ট বসানো
+            # এডিটরে বডি বসানো
             print("কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             if editor.count() > 0:
@@ -172,50 +202,56 @@ def post_with_browser(title, body):
                 )
             time.sleep(2)
 
-            # ধাপ ৩: স্ক্রিনের একদম নিচে স্ক্রোল করে Publish বাটনে ক্লিক
+            # ধাপ ৩: নিচে স্ক্রোল করে সরাসরি DOM Click দিয়ে প্রথম Publish বাটনে ক্লিক
             print("🚀 প্রথম Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            publish_btn = page.locator("button:has-text('Publish')").first
-            publish_btn.scroll_into_view_if_needed()
-            time.sleep(1)
-            publish_btn.click(force=True)
+            page.evaluate(
+                """() => {
+                    window.scrollTo(0, document.body.scrollHeight);
+                    const btns = Array.from(document.querySelectorAll('button'));
+                    const pubBtn = btns.find(b => b.textContent.trim() === 'Publish' && !b.closest('.ant-modal') && !b.closest('[role="dialog"]'));
+                    if (pubBtn) {
+                        pubBtn.click();
+                    }
+                }"""
+            )
             time.sleep(3)
 
-            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপে ক্লিক
-            print("🎯 মোডাল পপ-আপে ক্যাটাগরি ও ফাইনাল Publish নিশ্চিত করা হচ্ছে...", flush=True)
-            
-            # মোডালের ভেতরের Publish বাটন খুঁজে ক্লিক করা
-            modal_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").first
-            if modal_btn.count() > 0 and modal_btn.is_visible():
-                modal_btn.click(force=True)
-            else:
-                # ফলব্যাক হিসেবে পেজের শেষ Publish বাটন
-                page.locator("button:has-text('Publish')").last.click(force=True)
+            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপের ফাইনাল Publish বাটনে ক্লিক
+            print("🎯 মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+            page.evaluate(
+                """() => {
+                    const modal = document.querySelector('.ant-modal, div[role="dialog"]');
+                    if (modal) {
+                        const modalBtns = Array.from(modal.querySelectorAll('button'));
+                        const finalBtn = modalBtns.find(b => b.textContent.trim() === 'Publish');
+                        if (finalBtn) {
+                            finalBtn.click();
+                        }
+                    }
+                }"""
+            )
 
-            # ধাপ ৫: পোস্ট লাইভ হওয়ার নোটিফিকেশন চেক
-            print("⏳ পোস্ট লাইভ হওয়ার নোটিফিকেশনের অপেক্ষা করা হচ্ছে...", flush=True)
-            success = False
-            for _ in range(15):
-                time.sleep(2)
-                current_url = page.url.lower()
-                page_text = page.content().lower()
-
-                if "successfully" in page_text or "success" in page_text:
-                    success = True
-                    break
-
-                if f"/authors/{SEREY_USER.lower()}" in current_url and "write" not in current_url:
-                    success = True
-                    break
-
+            # স্ক্রিনশট সেভ
+            time.sleep(4)
             page.screenshot(path="serey_post_result.png")
 
-            if success:
-                print(f"🎉🎉 পোস্টটি ১০০% নিশ্চিতভাবে সেরি প্রোফাইলে লাইভ হয়েছে: {title}", flush=True)
+            # ধাপ ৫: সরাসরি প্রোফাইল ডাটাবেজ চেক করে শতভাগ নিশ্চিত হওয়া
+            print("🔍 সেরি প্রোফাইল ডাটাবেজে পোস্ট লাইভ হয়েছে কিনা চেক করা হচ্ছে...", flush=True)
+            for wait_round in range(1, 6):
+                time.sleep(4)
+                if is_post_live_on_serey(title):
+                    print(f"🎉🎉 পোস্টটি ১০০% নিশ্চিতভাবে সেরি প্রোফাইলে লাইভ পাওয়া গেছে: {title}", flush=True)
+                    browser.close()
+                    return True
+                print(f"অপেক্ষা করা হচ্ছে ({wait_round}/5)...", flush=True)
+
+            # যদি রিডাইরেক্ট হয়ে প্রোফাইল পেজে চলে যায়
+            if f"/authors/{SEREY_USER.lower()}" in page.url.lower() and "write" not in page.url.lower():
+                print(f"🎉🎉 ব্রাউজার সফলভাবে পোস্ট পেজে রিডাইরেক্ট হয়েছে: {title}", flush=True)
                 browser.close()
                 return True
-            else:
-                print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে, স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
 
+            print("সতর্কতা: পোস্টটি প্রোফাইল তালিকায় এখনও পাওয়া যায়নি (স্ক্রিনশট সেভ করা হয়েছে)।", flush=True)
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
             try:
@@ -264,7 +300,7 @@ def main():
     title = post_info.get("title", "")
     body = post_info.get("body", "")
 
-    print(f"\nপ্রসেস করা হচ্ছে: {title}", flush=True)
+    print(f"\nপ্রসেস করা হচ্ছে: {title}")
     success = post_with_browser(title, body)
 
     if success:
