@@ -34,6 +34,14 @@ jobs:
           SEREY_USERNAME: raihan123
         run: python -u main.py
 
+      - name: Upload Browser Screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-result-screenshot
+          path: serey_post_result.png
+          if-no-files-found: ignore
+
       - name: Save Queue and Log State
         run: |
           git config --global user.name "AutoBot"
