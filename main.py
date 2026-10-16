@@ -121,13 +121,13 @@ def dismiss_welcome_banner(page):
 
 
 def handle_login_modal(page):
-    """স্ক্রিনশটের Log In মোডালটি নিখুঁতভাবে পূরণ ও সাবমিট করা"""
+    """Log In মোডাল এলে ইউজারনেম ও পাসওয়ার্ড দিয়ে সাইন-ইন নিশ্চিত করা"""
     try:
         user_input = page.get_by_placeholder("Username")
         pass_input = page.get_by_placeholder("Private Key or Password")
 
         if user_input.count() > 0 and user_input.is_visible():
-            print("🔑 সেরি Log In মোডাল দৃশ্যমান হয়েছে! ইউজারনেম ও পাসওয়ার্ড পূরণ করা হচ্ছে...", flush=True)
+            print("🔑 সেরি Log In মোডাল সামনে এসেছে! ইউজারনেম ও পাসওয়ার্ড পূরণ করা হচ্ছে...", flush=True)
             user_input.click(force=True)
             user_input.fill(SEREY_USER)
             time.sleep(0.5)
@@ -136,7 +136,7 @@ def handle_login_modal(page):
             pass_input.fill(SEREY_PASSWORD)
             time.sleep(0.5)
 
-            # নীল রঙের আসল Log In বাটনে নিখুঁত ক্লিক (Exact Match)
+            # নীল রঙের আসল Log In বাটনে ক্লিক
             print("🚀 নীল 'Log In' বাটনে ক্লিক করা হচ্ছে...", flush=True)
             login_btn = page.get_by_role("button", name="Log In", exact=True)
             if login_btn.count() > 0 and login_btn.is_visible():
@@ -190,7 +190,7 @@ def post_with_browser(title, body):
 
         try:
             # ধাপ ১: সরাসরি পোস্ট লেখার পেজে যাওয়া
-            print("✍️ সরাসরি পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
+            print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
 
@@ -249,10 +249,9 @@ def post_with_browser(title, body):
             )
             time.sleep(3)
 
-            # ধাপ ৪: স্ক্রিনশটের Log In মোডাল হ্যান্ডেল করা
+            # যদি লগইন মোডাল সামনে আসে
             logged_in_now = handle_login_modal(page)
             if logged_in_now:
-                # লগইন হওয়ার পর দ্বিতীয়বার Publish বাটনে ক্লিক (ক্যাটাগরি মোডাল আনার জন্য)
                 print("🚀 লগইন শেষে আবার Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
                 page.evaluate(
                     """() => {
@@ -264,36 +263,54 @@ def post_with_browser(title, body):
                 )
                 time.sleep(3)
 
-            # ধাপ ৫: ক্যাটাগরি মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
-            print("🎯 ক্যাটাগরি মোডাল কনফার্ম করে ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-            page.wait_for_selector("div[role='dialog']:has-text('category'), .ant-modal:has-text('category'), .modal-publish-category, div[role='dialog']", state="visible", timeout=15000)
-            time.sleep(1)
+            # ধাপ ৪: স্ক্রিনশট ১ এর 'Preparing to publish' মোডাল শেষ হওয়া পর্যন্ত অপেক্ষা (ইমেজ আপলোড ফিক্স)
+            print("⏳ 'Preparing to publish' ইমেজ আপলোড শেষ হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
+            try:
+                page.wait_for_selector("text='Preparing to publish'", state="detached", timeout=40000)
+                print("✅ ইমেজ প্রসেসিং ও প্রিপেয়ারিং সম্পন্ন হয়েছে!", flush=True)
+            except Exception:
+                pass
+            time.sleep(2)
 
-            # ক্যাটাগরি মোডালের ফাইনাল Publish বাটন ক্লিক
-            modal_publish = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
-            if modal_publish.count() > 0:
-                modal_publish.click(force=True)
+            # ধাপ ৫: ক্যাটাগরি মোডাল পপ-আপের ফাইনাল নীল Publish বাটনে ক্লিক
+            cat_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
+            if cat_publish_btn.count() > 0 and cat_publish_btn.is_visible():
+                print("🎯 ক্যাটাগরি মোডালের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+                cat_publish_btn.click(force=True)
+            else:
+                # ফলব্যাক ক্লিক
+                page.evaluate("""() => {
+                    const modal = document.querySelector('div[role="dialog"], .ant-modal');
+                    if (modal) {
+                        const btns = Array.from(modal.querySelectorAll('button'));
+                        const finalBtn = btns.find(b => b.textContent.trim() === 'Publish');
+                        if (finalBtn) finalBtn.click();
+                    }
+                }""")
 
             # সাবমিটের পর পেজ আপডেট ও স্ক্রিনশট
-            print("⏳ পোস্ট লাইভ হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
-            time.sleep(6)
-            page.screenshot(path="serey_post_result.png")
+            print("⏳ পোস্ট লাইভ হওয়া ও রিডাইরেক্টের অপেক্ষা করা হচ্ছে...", flush=True)
+            for wait_round in range(1, 8):
+                time.sleep(3)
+                current_url = page.url.lower()
 
-            # ধাপ ৬: সরাসরি প্রোফাইল ডাটাবেজ চেক করে নিশ্চিত হওয়া
-            print("🔍 সেরি প্রোফাইল ডাটাবেজে পোস্ট লাইভ হয়েছে কিনা চেক করা হচ্ছে...", flush=True)
-            for wait_round in range(1, 6):
-                time.sleep(4)
-                if is_post_live_on_serey(title):
-                    print(f"🎉🎉 পোস্টটি ১০০% নিশ্চিতভাবে সেরি প্রোফাইলে লাইভ পাওয়া গেছে: {title}", flush=True)
+                # যদি প্রোফাইল পেজে রিডাইরেক্ট হয়ে যায়
+                if f"/authors/{SEREY_USER.lower()}" in current_url and "write" not in current_url:
+                    print(f"🎉🎉 ব্রাউজার সফলভাবে পোস্ট পেজে রিডাইরেক্ট হয়েছে: {title}", flush=True)
+                    page.screenshot(path="serey_post_result.png")
                     browser.close()
                     return True
-                print(f"অপেক্ষা করা হচ্ছে ({wait_round}/5)...", flush=True)
 
-            if f"/authors/{SEREY_USER.lower()}" in page.url.lower() and "write" not in page.url.lower():
-                print(f"🎉🎉 ব্রাউজার সফলভাবে পোস্ট পেজে রিডাইরেক্ট হয়েছে: {title}", flush=True)
-                browser.close()
-                return True
+                # সরাসরি প্রোফাইল ডাটাবেজে পোস্ট চেক
+                if is_post_live_on_serey(title):
+                    print(f"🎉🎉 পোস্টটি ১০০% নিশ্চিতভাবে সেরি প্রোফাইলে লাইভ পাওয়া গেছে: {title}", flush=True)
+                    page.screenshot(path="serey_post_result.png")
+                    browser.close()
+                    return True
+                
+                print(f"অপেক্ষা করা হচ্ছে ({wait_round}/7)...", flush=True)
 
+            page.screenshot(path="serey_post_result.png")
             print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে, স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
