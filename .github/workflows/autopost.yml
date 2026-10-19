@@ -2,7 +2,7 @@ name: Blurt to Serey Auto Post
 
 on:
   schedule:
-    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় স্বয়ংক্রিয়ভাবে ব্রাউজার চালু হবে (UTC 04:00 & 16:00)
+    # বাংলাদেশ সময় সকাল ১০:০০ এবং রাত ১০:০০ টায় স্বয়ংক্রিয়ভাবে রান হবে (UTC 04:00 & 16:00)
     - cron: '0 4,16 * * *'
   workflow_dispatch:
 
@@ -12,6 +12,7 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
