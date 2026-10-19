@@ -158,10 +158,10 @@ def handle_login_modal(page):
 def post_with_browser(title, body):
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
-    # Markdown ইমেজগুলোকে আসল HTML ইমেজ ট্যাগে রূপান্তর
-    html_body = re.sub(r'!\[.*?\]\((https?://[^\s\)]+)\)', r'<p><img src="\1" /></p>', body)
-    if not ("<p>" in html_body or "<div>" in html_body):
-        html_body = f"<p>{html_body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
+    # সাধারণ ও পরিষ্কার এইচটিএমএল রূপান্তর
+    formatted_body = body
+    if not ("<p>" in formatted_body or "<div>" in formatted_body):
+        formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -186,6 +186,9 @@ def post_with_browser(title, body):
         """)
 
         page = context.new_page()
+
+        # ব্রাউজারের কোনো এরর মেসেজ বা নেটওয়ার্ক এরর ধরা
+        page.on("pageerror", lambda err: print(f"⚠️ [Page Error]: {err}", flush=True))
 
         try:
             # ধাপ ১: পোস্ট পেজে যাওয়া
@@ -217,15 +220,8 @@ def post_with_browser(title, body):
             title_input.scroll_into_view_if_needed()
             title_input.click()
             title_input.fill(title)
-            # React Form Validation সচল করার জন্য
-            page.evaluate("""(t) => {
-                const el = document.querySelector("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]");
-                if (el) {
-                    el.value = t;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }""", title)
+            page.keyboard.press("Space")
+            page.keyboard.press("Backspace")
             time.sleep(1)
 
             # ব্লগের কন্টেন্ট বসানো
@@ -244,48 +240,43 @@ def post_with_browser(title, body):
                         editor.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 }""",
-                [html_body]
+                [formatted_body]
             )
             time.sleep(1)
 
-            # কীস্ট্রোক দিয়ে এডিটর কনফার্ম করা
             editor.click()
             page.keyboard.press("End")
             page.keyboard.type(" ")
             time.sleep(2)
 
-            # ধাপ ৩: নীল Publish বাটনে নিখুঁতভাবে ক্লিক করা
+            # ধাপ ৩: নিশ্চিতভাবে নীল Publish বাটনে ক্লিক
             print("🚀 নীল Publish বাটন স্ক্রোল ও ক্লিক করা হচ্ছে...", flush=True)
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            
+            # বাটনটি সরাসরি টার্গেট করে ক্লিক
+            btn = page.locator("button").filter(has_text=re.compile(r"^Publish$", re.I)).last
+            if btn.count() == 0:
+                btn = page.locator("button:has-text('Publish')").last
 
-            # পেজের সব Publish বাটনের লিস্ট নিয়ে আসল বাটনটিতে মাউস ইভেন্ট পাঠানো
-            clicked_success = page.evaluate("""() => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                const pubBtn = buttons.reverse().find(b => b.innerText && b.innerText.trim().includes('Publish'));
-                if (pubBtn) {
-                    pubBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    pubBtn.disabled = false;
-                    
-                    // সকল মাউস ও পয়েন্টার ইভেন্ট ট্রিগার করা
-                    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {
-                        pubBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                    });
-                    return true;
-                }
-                return false;
+            btn.scroll_into_view_if_needed()
+            time.sleep(1)
+            btn.click(force=True)
+            print("✅ নীল Publish বাটনে ক্লিক সম্পন্ন হয়েছে!", flush=True)
+
+            # ক্লিক করার সাথে সাথে ১ সেকেন্ড পর চেক করা কোনো এরর মেসেজ এসেছে কিনা
+            time.sleep(1.5)
+            error_msg = page.evaluate("""() => {
+                const el = document.querySelector('.ant-message-error, .ant-notification-notice, .ant-form-item-explain-error, [role="alert"]');
+                return el ? el.innerText : null;
             }""")
-            print(f"✅ বাটনে ইভেন্ট ট্রিগার ফলাফল: {clicked_success}", flush=True)
-            time.sleep(3)
+            if error_msg:
+                print(f"⚠️ সাইটে সতর্কবার্তা/এরর এসেছে: {error_msg}", flush=True)
 
-            # Playwright এর লোকাল ক্লিক দিয়ে আরেকবার নিশ্চিত করা
-            try:
-                native_btn = page.locator("button:has-text('Publish')").last
-                if native_btn.count() > 0 and native_btn.is_visible():
-                    native_btn.click(force=True)
-            except Exception:
-                pass
-            time.sleep(2)
+            # যদি লগইন চায়
+            logged_in_now = handle_login_modal(page)
+            if logged_in_now:
+                time.sleep(2)
+                btn.click(force=True)
+                time.sleep(2)
 
             # ধাপ ৪: Preparing to publish বা ইমেজ প্রসেসিং চেক
             try:
@@ -308,22 +299,22 @@ def post_with_browser(title, body):
             except Exception:
                 pass
 
-            # ধাপ ৬: পোস্ট সফলভাবে রিডাইরেক্ট হয়েছে কি না চেক
+            # ধাপ ৬: পোস্ট সফল হয়েছে কি না যাচাই করা
             print("⏳ পোস্ট লাইভ হওয়া ও রিডাইরেক্টের অপেক্ষা করা হচ্ছে...", flush=True)
             for wait_round in range(1, 10):
                 time.sleep(3)
                 current_url = page.url.lower()
 
-                # রিডাইরেক্ট পেজ চেক
+                # রিডাইরেক্ট চেক
                 if f"/authors/{SEREY_USER.lower()}" in current_url and "write" not in current_url:
                     print(f"🎉🎉 ব্রাউজার সফলভাবে পোস্ট পেজে রিডাইরেক্ট হয়েছে: {title}", flush=True)
                     page.screenshot(path="serey_post_result.png")
                     browser.close()
                     return True
 
-                # API দিয়ে সরাসরি সেরি ব্লকচেইনে পোস্ট চেক
+                # API চেক
                 if is_post_live_on_serey(title):
-                    print(f"🎉🎉 পোস্টটি সেরি প্ল্যাটফর্মে ১০০% সফলভাবে লাইভ পাওয়া গেছে: {title}", flush=True)
+                    print(f"🎉🎉 পোস্টটি সেরি প্ল্যাটফর্মে লাইভ পাওয়া গেছে: {title}", flush=True)
                     page.screenshot(path="serey_post_result.png")
                     browser.close()
                     return True
