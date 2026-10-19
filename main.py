@@ -158,9 +158,10 @@ def handle_login_modal(page):
 def post_with_browser(title, body):
     print("🌐 ভার্চুয়াল ক্রোম ব্রাউজার চালু করা হচ্ছে...", flush=True)
 
-    formatted_body = body
-    if not ("<p>" in formatted_body or "<div>" in formatted_body):
-        formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
+    # Markdown ইমেজগুলোকে আসল HTML ইমেজ ট্যাগে রূপান্তর
+    html_body = re.sub(r'!\[.*?\]\((https?://[^\s\)]+)\)', r'<p><img src="\1" /></p>', body)
+    if not ("<p>" in html_body or "<div>" in html_body):
+        html_body = f"<p>{html_body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -174,7 +175,7 @@ def post_with_browser(title, body):
         )
 
         context = browser.new_context(
-            viewport={"width": 1366, "height": 900},
+            viewport={"width": 1440, "height": 950},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         )
 
@@ -187,14 +188,14 @@ def post_with_browser(title, body):
         page = context.new_page()
 
         try:
-            # ধাপ ১: সরাসরি পোস্ট লেখার পেজে যাওয়া
+            # ধাপ ১: পোস্ট পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(4)
 
             dismiss_welcome_banner(page)
 
-            # যদি লগইন প্রয়োজন হয়
+            # যদি লগইন চায়
             try:
                 header_login = page.get_by_text("Sign up / Log in", exact=True)
                 if header_login.count() > 0 and header_login.is_visible():
@@ -204,7 +205,7 @@ def post_with_browser(title, body):
             except Exception:
                 pass
 
-            # ধাপ ২: এডিটর ও ফর্ম লোড হওয়া পর্যন্ত অপেক্ষা
+            # ধাপ ২: টাইটেল ও এডিটর লোড হওয়া পর্যন্ত অপেক্ষা
             print("⏳ এডিটর এবং ফর্ম লোড হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
             page.wait_for_selector(".ql-editor, div[contenteditable='true']", state="visible", timeout=30000)
             title_input = page.locator("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]").first
@@ -216,11 +217,18 @@ def post_with_browser(title, body):
             title_input.scroll_into_view_if_needed()
             title_input.click()
             title_input.fill(title)
-            page.keyboard.press("Space")
-            page.keyboard.press("Backspace")
+            # React Form Validation সচল করার জন্য
+            page.evaluate("""(t) => {
+                const el = document.querySelector("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]");
+                if (el) {
+                    el.value = t;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }""", title)
             time.sleep(1)
 
-            # এডিটরে বডি বসানো ও React State আপডেট নিশ্চিত করা
+            # ব্লগের কন্টেন্ট বসানো
             print("✍️ ব্লগের কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             editor.scroll_into_view_if_needed()
@@ -236,81 +244,86 @@ def post_with_browser(title, body):
                         editor.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 }""",
-                [formatted_body]
+                [html_body]
             )
             time.sleep(1)
+
+            # কীস্ট্রোক দিয়ে এডিটর কনফার্ম করা
             editor.click()
             page.keyboard.press("End")
             page.keyboard.type(" ")
             time.sleep(2)
 
-            # ধাপ ৩: নীল রঙের মূল Publish বাটনে নিশ্চিতভাবে ক্লিক করা
-            print("🚀 নীল Publish বাটনে ক্লিক করার চেষ্টা...", flush=True)
+            # ধাপ ৩: নীল Publish বাটনে নিখুঁতভাবে ক্লিক করা
+            print("🚀 নীল Publish বাটন স্ক্রোল ও ক্লিক করা হচ্ছে...", flush=True)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
-            # স্ক্রিনশটে থাকা ডানপাশের নীল বাটনটি টার্গেট করা
-            pub_btn = page.locator("button:has-text('Publish')").first
-            if pub_btn.count() > 0:
-                pub_btn.scroll_into_view_if_needed()
-                time.sleep(1)
-                pub_btn.hover()
-                pub_btn.click(force=True)
-                print("✅ নীল Publish বাটনে ক্লিক সম্পন্ন হয়েছে!", flush=True)
-            else:
-                # ফলব্যাক ক্লিক
-                page.evaluate("""() => {
-                    const btns = Array.from(document.querySelectorAll('button'));
-                    const b = btns.find(x => x.innerText.trim().includes('Publish'));
-                    if (b) b.click();
-                }""")
+            # পেজের সব Publish বাটনের লিস্ট নিয়ে আসল বাটনটিতে মাউস ইভেন্ট পাঠানো
+            clicked_success = page.evaluate("""() => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const pubBtn = buttons.reverse().find(b => b.innerText && b.innerText.trim().includes('Publish'));
+                if (pubBtn) {
+                    pubBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    pubBtn.disabled = false;
+                    
+                    // সকল মাউস ও পয়েন্টার ইভেন্ট ট্রিগার করা
+                    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {
+                        pubBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                    });
+                    return true;
+                }
+                return false;
+            }""")
+            print(f"✅ বাটনে ইভেন্ট ট্রিগার ফলাফল: {clicked_success}", flush=True)
             time.sleep(3)
 
-            # ক্লিক করার পর যদি লগইন পপ-আপ আসে
-            logged_in_now = handle_login_modal(page)
-            if logged_in_now:
-                time.sleep(2)
-                pub_btn = page.locator("button:has-text('Publish')").first
-                if pub_btn.count() > 0:
-                    pub_btn.click(force=True)
-                time.sleep(3)
+            # Playwright এর লোকাল ক্লিক দিয়ে আরেকবার নিশ্চিত করা
+            try:
+                native_btn = page.locator("button:has-text('Publish')").last
+                if native_btn.count() > 0 and native_btn.is_visible():
+                    native_btn.click(force=True)
+            except Exception:
+                pass
+            time.sleep(2)
 
-            # ধাপ ৪: Preparing to publish বা ইমেজ আপলোড অপেক্ষা
+            # ধাপ ৪: Preparing to publish বা ইমেজ প্রসেসিং চেক
             try:
                 prep = page.locator("text='Preparing to publish'")
-                if prep.count() > 0 and prep.is_visible():
+                if prep.count() > 0:
                     print("⏳ 'Preparing to publish' শেষ হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
-                    prep.wait_for(state="detached", timeout=35000)
+                    page.wait_for_selector("text='Preparing to publish'", state="hidden", timeout=40000)
                     print("✅ প্রিপেয়ারিং সম্পন্ন হয়েছে!", flush=True)
             except Exception:
                 pass
             time.sleep(2)
 
-            # ধাপ ৫: পপ-আপ মোডাল আসলে তার ভেতরের ফাইনাল Publish বাটনে ক্লিক
+            # ধাপ ৫: যদি ক্যাটাগরি বা কনফার্মেশন মোডাল আসে তার Publish বাটনে ক্লিক
             try:
-                modal_pub = page.locator(".ant-modal button:has-text('Publish'), [role='dialog'] button:has-text('Publish')").last
+                modal_pub = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
                 if modal_pub.count() > 0 and modal_pub.is_visible():
-                    print("🎯 ক্যাটাগরি/কনফার্মেশন মোডালের ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
+                    print("🎯 ক্যাটাগরি মোডালের ফাইনাল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
                     modal_pub.click(force=True)
                     time.sleep(2)
             except Exception:
                 pass
 
-            # ধাপ ৬: পোস্ট লাইভ হয়েছে কি না যাচাই করা
-            print("⏳ পোস্ট লাইভ হওয়া ও পেজ আপডেটের অপেক্ষা করা হচ্ছে...", flush=True)
+            # ধাপ ৬: পোস্ট সফলভাবে রিডাইরেক্ট হয়েছে কি না চেক
+            print("⏳ পোস্ট লাইভ হওয়া ও রিডাইরেক্টের অপেক্ষা করা হচ্ছে...", flush=True)
             for wait_round in range(1, 10):
                 time.sleep(3)
                 current_url = page.url.lower()
 
-                # সেরি প্রোফাইল পেজে রিডাইরেক্ট হয়েছে কি না
+                # রিডাইরেক্ট পেজ চেক
                 if f"/authors/{SEREY_USER.lower()}" in current_url and "write" not in current_url:
                     print(f"🎉🎉 ব্রাউজার সফলভাবে পোস্ট পেজে রিডাইরেক্ট হয়েছে: {title}", flush=True)
                     page.screenshot(path="serey_post_result.png")
                     browser.close()
                     return True
 
-                # API দিয়ে সরাসরি প্রোফাইল চেক
+                # API দিয়ে সরাসরি সেরি ব্লকচেইনে পোস্ট চেক
                 if is_post_live_on_serey(title):
-                    print(f"🎉🎉 পোস্টটি সেরি প্রোফাইলে সফলভাবে লাইভ পাওয়া গেছে: {title}", flush=True)
+                    print(f"🎉🎉 পোস্টটি সেরি প্ল্যাটফর্মে ১০০% সফলভাবে লাইভ পাওয়া গেছে: {title}", flush=True)
                     page.screenshot(path="serey_post_result.png")
                     browser.close()
                     return True
@@ -318,7 +331,7 @@ def post_with_browser(title, body):
                 print(f"অপেক্ষা করা হচ্ছে ({wait_round}/9)...", flush=True)
 
             page.screenshot(path="serey_post_result.png")
-            print("⚠️ সতর্কতা: পোস্ট লাইভ হতে কিছুটা দেরি হচ্ছে, স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
+            print("⚠️ পোস্ট লাইভ হতে কিছুটা দেরি হচ্ছে, স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
             try:
