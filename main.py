@@ -101,7 +101,6 @@ def is_post_live_on_serey(title):
 
 
 def extract_first_image_url(body, json_metadata_str):
-    """পোস্টের ভেতর থেকে প্রথম ছবির লিংক বের করা"""
     try:
         meta = json.loads(json_metadata_str or "{}")
         images = meta.get("image") or meta.get("images")
@@ -111,17 +110,14 @@ def extract_first_image_url(body, json_metadata_str):
     except Exception:
         pass
 
-    # Markdown ছবি
     md_match = re.search(r'!\[.*?\]\((https?://[^\s\)]+)\)', body)
     if md_match:
         return md_match.group(1).split('"')[0].split("'")[0].strip()
 
-    # HTML ছবি
     html_match = re.search(r'<img[^>]+src=["\'](https?://[^"\'>\s]+)["\']', body, re.IGNORECASE)
     if html_match:
         return html_match.group(1).strip()
 
-    # সাধারণ ছবির ইউআরএল
     raw_match = re.search(r'https?://[^\s"\'\)]+\.(?:jpg|jpeg|png|webp)', body, re.IGNORECASE)
     if raw_match:
         return raw_match.group(0).strip()
@@ -129,24 +125,24 @@ def extract_first_image_url(body, json_metadata_str):
     return None
 
 
-def download_image_securely(page, img_url):
-    """ব্রাউজারের আসল নেটওয়ার্ক স্ট্যাক দিয়ে ছবি ডাউনলোড করা"""
+def download_thumbnail_file(page, img_url):
+    """ব্রাউজার দিয়ে নিশ্চিতভাবে থাম্বনেইল ছবি ডাউনলোড করা"""
     if not img_url:
         return None
     try:
-        print(f"📥 ব্রাউজার দিয়ে থাম্বনেইল ছবি ডাউনলোড করা হচ্ছে: {img_url}", flush=True)
+        print(f"📥 থাম্বনেইল ছবি ডাউনলোড করা হচ্ছে: {img_url}", flush=True)
         resp = page.request.get(img_url, timeout=20000)
         if resp.status == 200:
             body_bytes = resp.body()
             if len(body_bytes) > 500:
                 ext = ".png" if ".png" in img_url.lower() else ".jpg"
-                file_path = os.path.abspath(f"post_thumbnail{ext}")
+                file_path = os.path.abspath(f"serey_thumb{ext}")
                 with open(file_path, "wb") as f:
                     f.write(body_bytes)
-                print(f"✅ থাম্বনেইল ছবি সফলভাবে প্রস্তুত হয়েছে ({len(body_bytes)} bytes)!", flush=True)
+                print(f"✅ থাম্বনেইল ছবি প্রস্তুত ({len(body_bytes)} bytes)!", flush=True)
                 return file_path
     except Exception as e:
-        print(f"ছবি ডাউনলোড এরর: {e}", flush=True)
+        print(f"ছবি ডাউনলোড নোটিশ: {e}", flush=True)
     return None
 
 
@@ -154,7 +150,6 @@ def dismiss_welcome_banner(page):
     try:
         close_btn = page.locator("button:has-text('Close'), .no-cookie-notice-overlay button:has-text('Close')").first
         if close_btn.count() > 0 and close_btn.is_visible():
-            print("🍪 'Welcome to Serey' ব্যানার বন্ধ করা হচ্ছে...", flush=True)
             close_btn.click(force=True)
             time.sleep(1)
     except Exception:
@@ -176,7 +171,7 @@ def handle_login_modal(page):
         pass_input = page.get_by_placeholder("Private Key or Password")
 
         if user_input.count() > 0 and user_input.is_visible():
-            print("🔑 সেরি Log In মোডাল দৃশ্যমান হয়েছে! ইউজারনেম ও পাসওয়ার্ড পূরণ করা হচ্ছে...", flush=True)
+            print("🔑 সেরি Log In মোডাল সামনে এসেছে! পূরণ করা হচ্ছে...", flush=True)
             user_input.click(force=True)
             user_input.fill(SEREY_USER)
             time.sleep(0.5)
@@ -185,24 +180,20 @@ def handle_login_modal(page):
             pass_input.fill(SEREY_PASSWORD)
             time.sleep(0.5)
 
-            # নীল Log In বাটনে ক্লিক
-            print("🚀 নীল 'Log In' বাটনে ক্লিক করা হচ্ছে...", flush=True)
             login_btn = page.get_by_role("button", name="Log In", exact=True)
             if login_btn.count() > 0 and login_btn.is_visible():
                 login_btn.click(force=True)
             else:
                 pass_input.press("Enter")
 
-            print("⏳ লগইন সম্পন্ন ও মোডাল বন্ধ হওয়ার অপেক্ষা...", flush=True)
             try:
                 page.wait_for_selector("input[placeholder='Username']", state="hidden", timeout=15000)
-                print("✅ লগইন মোডাল সফলভাবে বন্ধ হয়েছে!", flush=True)
             except Exception:
                 pass
             time.sleep(3)
             return True
     except Exception as e:
-        print(f"লগইন মোডাল হ্যান্ডেল নোটিশ: {e}", flush=True)
+        print(f"লগইন নোটিশ: {e}", flush=True)
     return False
 
 
@@ -213,7 +204,7 @@ def post_with_browser(title, body, img_url):
     if not ("<p>" in formatted_body or "<div>" in formatted_body):
         formatted_body = f"<p>{body.replace(chr(10) + chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
 
-    thumb_file_path = None
+    thumb_file = None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -227,7 +218,7 @@ def post_with_browser(title, body, img_url):
         )
 
         context = browser.new_context(
-            viewport={"width": 1366, "height": 900},
+            viewport={"width": 1366, "height": 950},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         )
 
@@ -240,15 +231,14 @@ def post_with_browser(title, body, img_url):
         page = context.new_page()
 
         try:
-            # থাম্বনেইল ছবি ডাউনলোড
+            # ছবি ডাউনলোড
             if img_url:
-                thumb_file_path = download_image_securely(page, img_url)
+                thumb_file = download_thumbnail_file(page, img_url)
 
             # ধাপ ১: পোস্ট লেখার পেজে যাওয়া
             print("✍️ পোস্ট লেখার পেজে যাওয়া হচ্ছে (/write/new)...", flush=True)
             page.goto("https://bengali.serey.io/write/new", timeout=45000, wait_until="domcontentloaded")
             time.sleep(3)
-
             dismiss_welcome_banner(page)
 
             # যদি লগইন বাটন থাকে
@@ -261,7 +251,7 @@ def post_with_browser(title, body, img_url):
             except Exception:
                 pass
 
-            # ধাপ ২: এডিটর ও ফর্ম লোড হওয়ার অপেক্ষা
+            # ধাপ ২: এডিটর ও ফর্ম লোড হওয়া
             print("⏳ এডিটর এবং ফর্ম লোড হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
             page.wait_for_selector(".ql-editor, div[contenteditable='true']", state="visible", timeout=30000)
             page.wait_for_selector("textarea[name='title'], input[name='title'], textarea[placeholder*='itle' i], input[placeholder*='itle' i]", state="visible", timeout=30000)
@@ -275,26 +265,19 @@ def post_with_browser(title, body, img_url):
             title_input.fill(title, force=True)
             time.sleep(1)
 
-            # ধাপ ৩: থাম্বনেইল বক্সে ছবি আপলোড করা (১০০% নির্ভরযোগ্য ফাইল ইনপুট)
-            if thumb_file_path and os.path.exists(thumb_file_path):
+            # থাম্বনেইল ছবি আপলোড
+            if thumb_file and os.path.exists(thumb_file):
                 print(f"🖼️ থাম্বনেইল বক্সে ছবি আপলোড করা হচ্ছে...", flush=True)
                 try:
                     file_input = page.locator("input[type='file']").first
                     if file_input.count() > 0:
-                        file_input.set_input_files(thumb_file_path)
-                        print("✅ থাম্বনেইল ছবি বক্সে সফলভাবে সেট করা হয়েছে!", flush=True)
-                        time.sleep(3)
-                    else:
-                        # বিকল্প ফাইল চুজার ক্লিক
-                        with page.expect_file_chooser(timeout=5000) as fc_info:
-                            page.locator("text='Add'").last.click(force=True)
-                        fc_info.value.set_files(thumb_file_path)
-                        print("✅ ফাইল চুজারে থাম্বনেইল সেট করা হয়েছে!", flush=True)
+                        file_input.set_input_files(thumb_file)
+                        print("✅ থাম্বনেইল বক্সে ছবি আপলোড সম্পন্ন!", flush=True)
                         time.sleep(3)
                 except Exception as t_err:
                     print(f"থাম্বনেইল আপলোড নোটিশ: {t_err}", flush=True)
 
-            # ধাপ ৪: এডিটরে বডি বসানো
+            # এডিটরে বডি বসানো
             print("✍️ ব্লগের কন্টেন্ট বসানো হচ্ছে...", flush=True)
             editor = page.locator(".ql-editor, div[contenteditable='true']").first
             editor.scroll_into_view_if_needed()
@@ -311,44 +294,54 @@ def post_with_browser(title, body, img_url):
             )
             time.sleep(2)
 
-            # ধাপ ৫: নিচে স্ক্রোল করে প্রথম Publish বাটনে নিশ্চিত ক্লিক
+            # ধাপ ৩: নিচে স্ক্রোল করে প্রথম Publish বাটনে নিশ্চিত সেন্ট্রাল ক্লিক
             print("🚀 প্রথম Publish বাটনে স্ক্রোল ও ক্লিক করা হচ্ছে...", flush=True)
-            page.evaluate(
-                """() => {
-                    window.scrollTo(0, document.body.scrollHeight);
-                }"""
-            )
-            time.sleep(1)
+            page.evaluate("""() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const pubBtn = btns.find(b => b.textContent.trim() === 'Publish' && !b.closest('.ant-modal') && !b.closest('[role="dialog"]'));
+                if (pubBtn) {
+                    pubBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+                    pubBtn.click();
+                }
+            }""")
+            time.sleep(2)
 
+            # প্লে-রাইট ফিজিক্যাল ক্লিক (ব্যাকআপ)
             publish_btn = page.locator("button:has-text('Publish'):not([role='dialog'] button):not(.ant-modal button)").last
-            publish_btn.scroll_into_view_if_needed()
-            time.sleep(1)
-            publish_btn.click(force=True)
+            if publish_btn.count() > 0:
+                publish_btn.scroll_into_view_if_needed()
+                publish_btn.click(force=True)
             time.sleep(3)
 
             # যদি লগইন মোডাল সামনে আসে
             logged_in_now = handle_login_modal(page)
             if logged_in_now:
                 print("🚀 লগইন শেষে আবার Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
-                publish_btn.scroll_into_view_if_needed()
-                publish_btn.click(force=True)
+                page.evaluate("""() => {
+                    const btns = Array.from(document.querySelectorAll('button'));
+                    const pubBtn = btns.find(b => b.textContent.trim() === 'Publish' && !b.closest('.ant-modal') && !b.closest('[role="dialog"]'));
+                    if (pubBtn) {
+                        pubBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+                        pubBtn.click();
+                    }
+                }""")
                 time.sleep(3)
 
-            # ধাপ ৬: ক্যাটাগরি মোডাল পপ-আপ আসা পর্যন্ত অপেক্ষা ও ফাইনাল ক্লিক
+            # ধাপ ৪: ক্যাটাগরি মোডাল পপ-আপ আসা পর্যন্ত অপেক্ষা ও ফাইনাল ক্লিক
             print("⏳ ক্যাটাগরি মোডাল আসার অপেক্ষা করা হচ্ছে...", flush=True)
             page.wait_for_selector("div[role='dialog'], .ant-modal", state="visible", timeout=20000)
             time.sleep(2)
 
             print("🎯 ক্যাটাগরি মোডালের ফাইনাল নীল Publish বাটনে ক্লিক করা হচ্ছে...", flush=True)
             modal_publish_btn = page.locator("div[role='dialog'] button:has-text('Publish'), .ant-modal button:has-text('Publish')").last
+            modal_publish_btn.scroll_into_view_if_needed()
             modal_publish_btn.click(force=True)
 
-            # সাবমিটের পর পেজ আপডেট ও স্ক্রিনশট
-            print("⏳ পোস্ট লাইভ হওয়ার অপেক্ষা করা হচ্ছে...", flush=True)
+            # সম্পূর্ণ পেজের স্ক্রিনশট নেওয়া (ফুল পেজ)
             time.sleep(8)
-            page.screenshot(path="serey_post_result.png")
+            page.screenshot(path="serey_post_result.png", full_page=True)
 
-            # ধাপ ৭: সরাসরি প্রোফাইল ডাটাবেজ চেক করে নিশ্চিত হওয়া
+            # ধাপ ৫: সরাসরি প্রোফাইল ডাটাবেজ চেক করে নিশ্চিত হওয়া
             print("🔍 সেরি প্রোফাইল ডাটাবেজে পোস্ট লাইভ হয়েছে কিনা চেক করা হচ্ছে...", flush=True)
             for wait_round in range(1, 8):
                 time.sleep(3)
@@ -366,19 +359,18 @@ def post_with_browser(title, body, img_url):
                 
                 print(f"অপেক্ষা করা হচ্ছে ({wait_round}/7)...", flush=True)
 
-            page.screenshot(path="serey_post_result.png")
-            print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে, স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
+            print("সতর্কতা: পোস্ট সম্পন্ন হয়েছে, ফুল পেজ স্ক্রিনশট সংরক্ষণ করা হয়েছে।", flush=True)
         except Exception as e:
             print(f"❌ ব্রাউজার অটোমেশন এরর: {e}", flush=True)
             try:
-                page.screenshot(path="serey_post_result.png")
+                page.screenshot(path="serey_post_result.png", full_page=True)
             except Exception:
                 pass
         finally:
             browser.close()
-            if thumb_file_path and os.path.exists(thumb_file_path):
+            if thumb_file and os.path.exists(thumb_file):
                 try:
-                    os.remove(thumb_file_path)
+                    os.remove(thumb_file)
                 except Exception:
                     pass
 
@@ -422,7 +414,6 @@ def main():
     body = post_info.get("body", "")
     json_meta = post_info.get("json_metadata", "{}")
 
-    # ব্লার্ট পোস্ট থেকে প্রথম ছবির লিংক বের করা
     img_url = extract_first_image_url(body, json_meta)
 
     print(f"\nপ্রসেস করা হচ্ছে: {title}")
