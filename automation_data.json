@@ -1,6 +1,5 @@
 {
   "queue": [
-    "line-blues-hee",
     "darkguard-ironwing-purchase-experience-new",
     "hairy-croton-d48",
     "saltwraith-corsair-card-buying-experience",
@@ -90,7 +89,8 @@
     "my-new-collection-pride-my",
     "splinterlands-ranked-battle-report-another",
     "byrsonima-sericea-ux",
-    "my-detailed-experience-with-the"
+    "my-detailed-experience-with-the",
+    "line-blues-hee"
   ],
   "posted": [
     "the-joy-of-playing-games-is-priceless-no-matter-the-score",
@@ -106,7 +106,6 @@
     "pirate-of-eight-card-purchasing"
   ],
   "timestamps": [
-    1792442991.6043365,
     1792487017.8049963
   ]
 }
