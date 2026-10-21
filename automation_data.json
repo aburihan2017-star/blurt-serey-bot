@@ -1,6 +1,5 @@
 {
   "queue": [
-    "hairy-croton-d48",
     "saltwraith-corsair-card-buying-experience",
     "busy-beaver",
     "modern-gold-i",
@@ -103,9 +102,11 @@
     "i-got-2-gold-foil-cards-in-just-a-few-packs",
     "elms-7em",
     "pirate-of-eight-card-purchasing",
-    "darkguard-ironwing-purchase-experience-new"
+    "darkguard-ironwing-purchase-experience-new",
+    "hairy-croton-d48"
   ],
   "timestamps": [
-    1792565924.0123858
+    1792565924.0123858,
+    1792573363.5024948
   ]
 }
