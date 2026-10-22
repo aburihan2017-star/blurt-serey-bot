@@ -1,6 +1,5 @@
 {
   "queue": [
-    "modern-gold-i",
     "after-unlocking-modern-diamond-iii",
     "i-opened-one-reward-after",
     "unlocking-modern-gold",
@@ -103,7 +102,10 @@
     "elms-7em",
     "pirate-of-eight-card-purchasing",
     "darkguard-ironwing-purchase-experience-new",
-    "hairy-croton-d48"
+    "hairy-croton-d48",
+    "modern-gold-i"
   ],
-  "timestamps": []
+  "timestamps": [
+    1792698081.3521504
+  ]
 }
