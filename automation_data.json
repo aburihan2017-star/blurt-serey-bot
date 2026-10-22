@@ -1,6 +1,5 @@
 {
   "queue": [
-    "saltwraith-corsair-card-buying-experience",
     "busy-beaver",
     "modern-gold-i",
     "after-unlocking-modern-diamond-iii",
@@ -88,7 +87,8 @@
     "splinterlands-ranked-battle-report-another",
     "byrsonima-sericea-ux",
     "my-detailed-experience-with-the",
-    "line-blues-hee"
+    "line-blues-hee",
+    "saltwraith-corsair-card-buying-experience"
   ],
   "posted": [
     "the-joy-of-playing-games-is-priceless-no-matter-the-score",
@@ -105,8 +105,5 @@
     "darkguard-ironwing-purchase-experience-new",
     "hairy-croton-d48"
   ],
-  "timestamps": [
-    1792565924.0123858,
-    1792573363.5024948
-  ]
+  "timestamps": []
 }
