@@ -1,6 +1,5 @@
 {
   "queue": [
-    "unlocking-modern-gold",
     "argarux-magus-card-buying-experience",
     "the-aranduriel-card",
     "opening-a-gladius-pack-luck",
@@ -103,10 +102,11 @@
     "hairy-croton-d48",
     "modern-gold-i",
     "after-unlocking-modern-diamond-iii",
-    "i-opened-one-reward-after"
+    "i-opened-one-reward-after",
+    "unlocking-modern-gold"
   ],
   "timestamps": [
-    1792745989.9251776,
-    1792784552.7570848
+    1792784552.7570848,
+    1792830833.7872028
   ]
 }
