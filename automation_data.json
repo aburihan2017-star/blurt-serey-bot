@@ -1,6 +1,5 @@
 {
   "queue": [
-    "the-aranduriel-card",
     "opening-a-gladius-pack-luck",
     "feelings-of-buying-a-flame",
     "the-endura-brune-card",
@@ -103,10 +102,11 @@
     "after-unlocking-modern-diamond-iii",
     "i-opened-one-reward-after",
     "unlocking-modern-gold",
-    "argarux-magus-card-buying-experience"
+    "argarux-magus-card-buying-experience",
+    "the-aranduriel-card"
   ],
   "timestamps": [
-    1792830833.7872028,
-    1792866702.317827
+    1792866702.317827,
+    1792918388.1565683
   ]
 }
