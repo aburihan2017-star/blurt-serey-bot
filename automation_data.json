@@ -1,6 +1,5 @@
 {
   "queue": [
-    "the-endura-brune-card",
     "gold-ii-at-the-beginning",
     "the-great-experience-of-opening",
     "the-lady-stealthfire-card",
@@ -103,9 +102,11 @@
     "unlocking-modern-gold",
     "argarux-magus-card-buying-experience",
     "the-aranduriel-card",
-    "feelings-of-buying-a-flame"
+    "feelings-of-buying-a-flame",
+    "the-endura-brune-card"
   ],
   "timestamps": [
-    1793027358.145462
+    1793027358.145462,
+    1793047828.2238257
   ]
 }
