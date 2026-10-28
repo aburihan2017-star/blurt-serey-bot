@@ -1,6 +1,5 @@
 {
   "queue": [
-    "the-great-experience-of-opening",
     "the-lady-stealthfire-card",
     "new-season-new-league-new",
     "boring-hobgoblin-card-buying-experience",
@@ -103,9 +102,11 @@
     "the-aranduriel-card",
     "feelings-of-buying-a-flame",
     "the-endura-brune-card",
-    "gold-ii-at-the-beginning"
+    "gold-ii-at-the-beginning",
+    "the-great-experience-of-opening"
   ],
   "timestamps": [
-    1793132547.5751436
+    1793132547.5751436,
+    1793182517.3220193
   ]
 }
