@@ -1,6 +1,5 @@
 {
   "queue": [
-    "new-season-new-league-new",
     "boring-hobgoblin-card-buying-experience",
     "benefits-of-the-cards-obtained",
     "today-ranked-battle-experience-strategy",
@@ -103,10 +102,11 @@
     "the-endura-brune-card",
     "gold-ii-at-the-beginning",
     "the-great-experience-of-opening",
-    "the-lady-stealthfire-card"
+    "the-lady-stealthfire-card",
+    "new-season-new-league-new"
   ],
   "timestamps": [
-    1793182517.3220193,
-    1793220207.4871974
+    1793220207.4871974,
+    1793270381.5970156
   ]
 }
