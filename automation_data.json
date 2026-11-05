@@ -1,6 +1,5 @@
 {
   "queue": [
-    "open-minor-chest-with-glint",
     "obsidian-dreadcore-a-legendary-dragon",
     "my-new-collection-s-powerful",
     "-my-entry-into-a-new-league-gold-i-unlock-and-experience-getting-amazing-rewards-fh1",
@@ -103,10 +102,11 @@
     "buying-ashveil-tactician-card-in",
     "gladius-pack-opening-experience-a",
     "todays-ranked-battle-a-great",
-    "opening-the-3-glid-packs"
+    "opening-the-3-glid-packs",
+    "open-minor-chest-with-glint"
   ],
   "timestamps": [
-    1793792864.9218886,
-    1793828412.3533995
+    1793828412.3533995,
+    1793879148.2471893
   ]
 }
