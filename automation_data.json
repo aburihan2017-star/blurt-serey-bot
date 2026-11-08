@@ -1,6 +1,5 @@
 {
   "queue": [
-    "ghostly-blacksmith",
     "unlocking-diamond-iii-a-memorable",
     "my-new-collection-esper-shadowbreak",
     "i-got-2-gold-foil",
@@ -103,10 +102,11 @@
     "my-new-collection-s-powerful",
     "-my-entry-into-a-new-league-gold-i-unlock-and-experience-getting-amazing-rewards-fh1",
     "today-i-leveled-up-the",
-    "todays-amazing-battle-experience-great"
+    "todays-amazing-battle-experience-great",
+    "ghostly-blacksmith"
   ],
   "timestamps": [
-    1794048615.1569111,
-    1794080859.7513509
+    1794080859.7513509,
+    1794135490.9887497
   ]
 }
