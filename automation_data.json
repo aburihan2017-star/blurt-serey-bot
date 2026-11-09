@@ -1,6 +1,5 @@
 {
   "queue": [
-    "i-got-2-gold-foil",
     "molten-ogre-card-buying-experience",
     "a-powerful-card-in-my",
     "decrepit-windseer-analysis-uses-and",
@@ -103,10 +102,11 @@
     "todays-amazing-battle-experience-great",
     "ghostly-blacksmith",
     "unlocking-diamond-iii-a-memorable",
-    "my-new-collection-esper-shadowbreak"
+    "my-new-collection-esper-shadowbreak",
+    "i-got-2-gold-foil"
   ],
   "timestamps": [
-    1794168349.6717901,
-    1794227140.0079584
+    1794227140.0079584,
+    1794268562.217197
   ]
 }
