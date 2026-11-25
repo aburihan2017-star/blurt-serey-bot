@@ -1,6 +1,5 @@
 {
   "queue": [
-    "runic-skychonk",
     "sable-dustpaw-card-from-splinterlands-my-new-powerful-warrior",
     "i-opened-3-glint-packs-today-small-and-got-some-great-cards-or-splinterlands-glint-reward-opening",
     "today-ranked-battle-experience-strategy-patience-memorable-win",
@@ -24,7 +23,8 @@
     "saltwraith-corsair-card-buying-experience",
     "busy-beaver",
     "opening-a-gladius-pack-luck",
-    "the-most-interesting-card-the-guild-pack"
+    "the-most-interesting-card-the-guild-pack",
+    "runic-skychonk"
   ],
   "posted": [
     "the-joy-of-playing-games-is-priceless-no-matter-the-score",
@@ -105,7 +105,5 @@
     "line-blues",
     "gbtyl-hairy-croton"
   ],
-  "timestamps": [
-    1795565848.1338754
-  ]
+  "timestamps": []
 }
